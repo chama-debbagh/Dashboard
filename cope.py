@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from dash import Dash, html, dcc, callback, Output, Input
+from dash import Dash, html, dcc, callback, Output, Input, callback_context  # Ajout explicite de callback_context
 import plotly.express as px
 import plotly.graph_objects as go
 from sqlalchemy import create_engine
@@ -36,6 +36,10 @@ class DataConnector:
                 engine = create_engine(self.connection_params['connection_string'])
                 self.data = pd.read_sql(self.connection_params['query'], engine)
                 return True
+            # Ajout d'un type 'memory' pour utiliser des données déjà en mémoire
+            elif self.source_type == 'memory':
+                # Pas besoin de connexion, les données sont déjà fournies
+                return True
             else:
                 print(f"Source type {self.source_type} not supported yet")
                 return False
@@ -46,6 +50,11 @@ class DataConnector:
     def get_data(self):
         """Retourne les données obtenues"""
         return self.data
+    
+    def set_data(self, data):
+        """Définit les données directement"""
+        self.data = data
+        return self
     
     def export_to_tableau(self, output_path):
         """Exporte les données dans un format compatible avec Tableau (.hyper ou .csv)"""
@@ -134,6 +143,16 @@ class DashboardCreator:
         
     def create_layout(self, title="Dashboard Python"):
         """Crée la mise en page du dashboard"""
+        # Créer un dropdown initial vide mais avec l'ID défini
+        default_filter_values = html.Div([
+            html.Label("Sélectionner une valeur:"),
+            dcc.Dropdown(
+                id='value-filter',
+                options=[],
+                value=None
+            )
+        ], id='filter-value-container')
+        
         self.app.layout = html.Div([
             html.H1(title, style={'textAlign': 'center'}),
             
@@ -148,7 +167,7 @@ class DashboardCreator:
                                 if self.data[col].dtype == 'object'],
                         value=None
                     ),
-                    html.Div(id='filter-value-container')
+                    default_filter_values  # Ajout de l'élément initial vide mais avec ID
                 ], style={'width': '30%', 'display': 'inline-block', 'vertical-align': 'top'}),
                 
                 html.Div([
@@ -169,8 +188,8 @@ class DashboardCreator:
             
             html.Div([
                 html.H3("Exporter les données"),
-                html.Button("Exporter pour Tableau", id="btn-export-tableau"),
-                html.Button("Exporter pour Power BI", id="btn-export-powerbi", style={'marginLeft': '10px'}),
+                html.Button("Exporter pour Tableau", id="btn-export-tableau", n_clicks=0),  # Initialisation n_clicks
+                html.Button("Exporter pour Power BI", id="btn-export-powerbi", n_clicks=0, style={'marginLeft': '10px'}),  # Initialisation n_clicks
                 html.Div(id='export-status')
             ], style={'marginTop': '20px'})
         ])
@@ -182,7 +201,15 @@ class DashboardCreator:
         )
         def update_filter_values(selected_column):
             if selected_column is None:
-                return []
+                # Retourner un dropdown vide mais avec l'ID défini
+                return [
+                    html.Label("Sélectionner une valeur:"),
+                    dcc.Dropdown(
+                        id='value-filter',
+                        options=[],
+                        value=None
+                    )
+                ]
             
             values = sorted(self.data[selected_column].unique())
             return [
@@ -202,8 +229,8 @@ class DashboardCreator:
              Input('value-filter', 'value')]
         )
         def update_graph1(column, values):
-            if column is None or values is None:
-                # Graphique par défaut
+            # Graphique par défaut
+            if column is None or values is None or values == []:
                 fig = px.bar(self.data.iloc[:10], x=self.data.columns[0], y=self.data.columns[1] 
                             if len(self.data.columns) > 1 else self.data.columns[0],
                             title="Exemple de graphique en barres")
@@ -214,6 +241,13 @@ class DashboardCreator:
                 filtered_data = self.data[self.data[column].isin(values)]
             else:
                 filtered_data = self.data[self.data[column] == values]
+            
+            # S'assurer que filtered_data n'est pas vide
+            if filtered_data.empty:
+                fig = px.bar(self.data.iloc[:10], x=self.data.columns[0], y=self.data.columns[1] 
+                            if len(self.data.columns) > 1 else self.data.columns[0],
+                            title="Données filtrées indisponibles - Graphique par défaut")
+                return fig
             
             # Créer un graphique basé sur les données filtrées
             numeric_cols = filtered_data.select_dtypes(include=['number']).columns
@@ -235,8 +269,8 @@ class DashboardCreator:
              Input('value-filter', 'value')]
         )
         def update_graph2(column, values):
-            if column is None or values is None:
-                # Graphique par défaut
+            # Graphique par défaut
+            if column is None or values is None or values == []:
                 numeric_cols = self.data.select_dtypes(include=['number']).columns
                 if len(numeric_cols) >= 2:
                     fig = px.scatter(self.data.iloc[:50], x=numeric_cols[0], y=numeric_cols[1],
@@ -250,6 +284,16 @@ class DashboardCreator:
                 filtered_data = self.data[self.data[column].isin(values)]
             else:
                 filtered_data = self.data[self.data[column] == values]
+            
+            # S'assurer que filtered_data n'est pas vide
+            if filtered_data.empty:
+                numeric_cols = self.data.select_dtypes(include=['number']).columns
+                if len(numeric_cols) >= 2:
+                    fig = px.scatter(self.data.iloc[:50], x=numeric_cols[0], y=numeric_cols[1],
+                                    title="Données filtrées indisponibles - Graphique par défaut")
+                else:
+                    fig = px.line(self.data.iloc[:20], title="Données filtrées indisponibles - Graphique par défaut")
+                return fig
             
             # Créer un graphique basé sur les données filtrées
             numeric_cols = filtered_data.select_dtypes(include=['number']).columns
@@ -273,7 +317,7 @@ class DashboardCreator:
              Input('value-filter', 'value')]
         )
         def update_table(column, values):
-            if column is None or values is None:
+            if column is None or values is None or values == []:
                 df_display = self.data.head(10)
             else:
                 # Filtrer les données selon la sélection
@@ -281,6 +325,10 @@ class DashboardCreator:
                     df_display = self.data[self.data[column].isin(values)].head(20)
                 else:
                     df_display = self.data[self.data[column] == values].head(20)
+            
+            # S'assurer que df_display n'est pas vide
+            if df_display.empty:
+                df_display = self.data.head(10)
             
             return html.Table(
                 # En-tête
@@ -291,34 +339,49 @@ class DashboardCreator:
                 ]) for i in range(min(len(df_display), 10))]
             )
         
-        # Callbacks pour les exportations
+        # Callbacks pour les exportations - Corrigé pour utiliser directement les données
         @self.app.callback(
             Output('export-status', 'children'),
             [Input('btn-export-tableau', 'n_clicks'),
              Input('btn-export-powerbi', 'n_clicks')]
         )
         def export_data(tableau_clicks, powerbi_clicks):
+            # Vérifier si c'est le premier rendu
+            if tableau_clicks is None and powerbi_clicks is None:
+                return ""
+            
+            # Vérifier quel bouton a été cliqué
             ctx = callback_context
             if not ctx.triggered:
                 return ""
             
             button_id = ctx.triggered[0]['prop_id'].split('.')[0]
             
-            if button_id == "btn-export-tableau":
-                connector = DataConnector("memory")
-                connector.data = self.data
-                if connector.export_to_tableau("./dashboard_data_export.csv"):
+            # Utiliser directement les données du dashboard
+            if button_id == "btn-export-tableau" and tableau_clicks > 0:
+                try:
+                    self.data.to_csv("./dashboard_data_export.csv", index=False)
                     return html.Div("Données exportées pour Tableau avec succès!", style={'color': 'green'})
-                else:
-                    return html.Div("Erreur lors de l'exportation pour Tableau", style={'color': 'red'})
+                except Exception as e:
+                    return html.Div(f"Erreur lors de l'exportation pour Tableau: {str(e)}", style={'color': 'red'})
             
-            elif button_id == "btn-export-powerbi":
-                connector = DataConnector("memory")
-                connector.data = self.data
-                if connector.export_to_powerbi("./dashboard_data_export.pbix"):
+            elif button_id == "btn-export-powerbi" and powerbi_clicks > 0:
+                try:
+                    # Exporter en CSV pour Power BI
+                    self.data.to_csv("./dashboard_data_export_powerbi.csv", index=False)
+                    
+                    # Créer un fichier de métadonnées
+                    metadata = {
+                        "columns": list(self.data.columns),
+                        "data_types": {col: str(self.data[col].dtype) for col in self.data.columns}
+                    }
+                    
+                    with open("./dashboard_data_export_powerbi.csv.metadata.json", 'w') as f:
+                        json.dump(metadata, f)
+                    
                     return html.Div("Données exportées pour Power BI avec succès!", style={'color': 'green'})
-                else:
-                    return html.Div("Erreur lors de l'exportation pour Power BI", style={'color': 'red'})
+                except Exception as e:
+                    return html.Div(f"Erreur lors de l'exportation pour Power BI: {str(e)}", style={'color': 'red'})
             
             return ""
         
@@ -340,12 +403,6 @@ def main():
         'Clients': np.random.randint(10, 100, 100)
     }
     df = pd.DataFrame(data)
-    
-    # Connexion aux données (simulée avec des données en mémoire)
-    # Dans un cas réel, vous utiliseriez plutôt:
-    # connector = DataConnector('csv', {'file_path': 'chemin/vers/vos/donnees.csv'})
-    # connector.connect()
-    # df = connector.get_data()
     
     # Traitement des données
     processor = DataProcessor(df)
@@ -372,9 +429,6 @@ def main():
     print("Dashboard créé avec succès!")
     print("Utilisez les commandes suivantes pour lancer le dashboard:")
     print("dashboard.run_dashboard()")
-    
-    # Décommentez la ligne ci-dessous pour lancer automatiquement le dashboard
-    # dashboard.run_dashboard()
     
     return dashboard
 
