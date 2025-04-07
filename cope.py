@@ -291,38 +291,28 @@ class DashboardCreator:
                 ]) for i in range(min(len(df_display), 10))]
             )
         
-        # Callbacks pour les exportations
-        @self.app.callback(
-            Output('export-status', 'children'),
-            [Input('btn-export-tableau', 'n_clicks'),
-             Input('btn-export-powerbi', 'n_clicks')]
-        )
-        def export_data(tableau_clicks, powerbi_clicks):
-            ctx = callback_context
-            if not ctx.triggered:
-                return ""
-            
-            button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-            
-            if button_id == "btn-export-tableau":
-                connector = DataConnector("memory")
-                connector.data = self.data
-                if connector.export_to_tableau("./dashboard_data_export.csv"):
-                    return html.Div("Données exportées pour Tableau avec succès!", style={'color': 'green'})
-                else:
-                    return html.Div("Erreur lors de l'exportation pour Tableau", style={'color': 'red'})
-            
-            elif button_id == "btn-export-powerbi":
-                connector = DataConnector("memory")
-                connector.data = self.data
-                if connector.export_to_powerbi("./dashboard_data_export.pbix"):
-                    return html.Div("Données exportées pour Power BI avec succès!", style={'color': 'green'})
-                else:
-                    return html.Div("Erreur lors de l'exportation pour Power BI", style={'color': 'red'})
-            
-            return ""
-        
-        return self
+        # Remplacez le callback d'exportation par celui-ci
+@self.app.callback(
+    Output('export-status', 'children'),
+    [Input('btn-export-tableau', 'n_clicks'),
+     Input('btn-export-powerbi', 'n_clicks')]
+)
+def export_data(tableau_clicks, powerbi_clicks):
+    ctx = callback_context
+    if not ctx.triggered:
+        return ""
+    
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    
+    if button_id == "btn-export-tableau":
+        # Simplifiez cette partie pour tester
+        return html.Div("Exportation pour Tableau tentée", style={'color': 'green'})
+    
+    elif button_id == "btn-export-powerbi":
+        # Simplifiez cette partie pour tester
+        return html.Div("Exportation pour Power BI tentée", style={'color': 'green'})
+    
+    return ""
     
     def run_dashboard(self, debug=True, port=8050):
         """Lance le dashboard"""
