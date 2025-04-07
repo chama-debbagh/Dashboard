@@ -326,7 +326,7 @@ class DashboardCreator:
     
     def run_dashboard(self, debug=True, port=8050):
         """Lance le dashboard"""
-        self.app.run_server(debug=debug, port=port)
+        self.app.run(debug=debug, port=port)
 
 # Exemple d'utilisation du code ci-dessus
 def main():
