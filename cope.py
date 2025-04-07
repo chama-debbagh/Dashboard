@@ -10,7 +10,6 @@ from sqlalchemy import create_engine
 import os
 import json
 
-
 # Classe pour gérer la connexion et l'extraction des données
 class DataConnector:
     def __init__(self, source_type, connection_params=None):
@@ -22,8 +21,6 @@ class DataConnector:
         self.source_type = source_type
         self.connection_params = connection_params
         self.data = None
-
-    
         
     def connect(self):
         """Établit la connexion à la source de données"""
