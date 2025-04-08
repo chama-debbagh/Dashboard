@@ -1,0 +1,1 @@
+{"columns": ["Date", "Cat\u00e9gorie", "R\u00e9gion", "Ventes", "Profit", "Clients"], "data_types": {"Date": "object", "Cat\u00e9gorie": "object", "R\u00e9gion": "object", "Ventes": "float64", "Profit": "int64", "Clients": "float64"}}
