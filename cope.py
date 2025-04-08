@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from dash import Dash, html, dcc, callback, Output, Input, callback_context  # Ajout explicite de callback_context
+from dash import Dash, html, dcc, callback, Output, Input, callback_context
 import plotly.express as px
 import plotly.graph_objects as go
 from sqlalchemy import create_engine
@@ -143,80 +143,33 @@ class DashboardCreator:
         """
         self.data = data
         self.app = Dash(__name__)
-
-    # Dans la classe DashboardCreator, ajoutons un composant pour télécharger des fichiers
-# Au début de la méthode create_layout():
-
-upload_component = html.Div([
-    html.H3("Charger vos données"),
-    dcc.Upload(
-        id='upload-data',
-        children=html.Div([
-            'Glissez-déposez ou ',
-            html.A('sélectionnez un fichier CSV ou Excel')
-        ]),
-        style={
-            'width': '100%',
-            'height': '60px',
-            'lineHeight': '60px',
-            'borderWidth': '1px',
-            'borderStyle': 'dashed',
-            'borderRadius': '5px',
-            'textAlign': 'center',
-            'margin': '10px'
-        },
-        multiple=False
-    ),
-    html.Div(id='upload-status')
-])
-
-# Ensuite, ajoutez ce composant au layout:
-self.app.layout = html.Div([
-    html.H1(title, style={'textAlign': 'center'}),
-    upload_component,
-    # Le reste de votre layout ...
-])
-
-# Ajoutez également un callback pour traiter le fichier téléchargé:
-@self.app.callback(
-    [Output('upload-status', 'children'),
-     Output('column-filter', 'options'),
-     Output('column-filter', 'value')],
-    Input('upload-data', 'contents'),
-    State('upload-data', 'filename')
-)
-def update_output(contents, filename):
-    if contents is not None:
-        content_type, content_string = contents.split(',')
-        decoded = base64.b64decode(content_string)
-        try:
-            if 'csv' in filename:
-                # Assume that the user uploaded a CSV file
-                df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-            elif 'xls' in filename:
-                # Assume that the user uploaded an excel file
-                df = pd.read_excel(io.BytesIO(decoded))
-            else:
-                return 'Format de fichier non supporté. Utilisez CSV ou Excel.', [], None
-                
-            # Mise à jour des données du dashboard
-            self.data = df
-            
-            # Mise à jour des options de colonnes
-            options = [{'label': col, 'value': col} for col in df.columns 
-                      if df[col].dtype == 'object']
-            
-            return html.Div([
-                f'Fichier "{filename}" chargé avec succès. {len(df)} lignes et {len(df.columns)} colonnes.'
-            ]), options, None
-        except Exception as e:
-            return html.Div([
-                'Erreur lors du traitement du fichier: ' + str(e)
-            ]), [], None
-    return '', [], None
         
     def create_layout(self, title="Dashboard Python"):
         """Crée la mise en page du dashboard"""
+        # Composant pour télécharger des fichiers
+        upload_component = html.Div([
+            html.H3("Charger vos données"),
+            dcc.Upload(
+                id='upload-data',
+                children=html.Div([
+                    'Glissez-déposez ou ',
+                    html.A('sélectionnez un fichier CSV ou Excel')
+                ]),
+                style={
+                    'width': '100%',
+                    'height': '60px',
+                    'lineHeight': '60px',
+                    'borderWidth': '1px',
+                    'borderStyle': 'dashed',
+                    'borderRadius': '5px',
+                    'textAlign': 'center',
+                    'margin': '10px'
+                },
+                multiple=False
+            ),
+            html.Div(id='upload-status')
+        ])
+        
         # Créer un dropdown initial vide mais avec l'ID défini
         default_filter_values = html.Div([
             html.Label("Sélectionner une valeur:"),
@@ -229,6 +182,7 @@ def update_output(contents, filename):
         
         self.app.layout = html.Div([
             html.H1(title, style={'textAlign': 'center'}),
+            upload_component,
             
             html.Div([
                 html.Div([
@@ -267,6 +221,44 @@ def update_output(contents, filename):
                 html.Div(id='export-status')
             ], style={'marginTop': '20px'})
         ])
+        
+        # Callback pour traiter le fichier téléchargé
+        @self.app.callback(
+            [Output('upload-status', 'children'),
+            Output('column-filter', 'options'),
+            Output('column-filter', 'value')],
+            Input('upload-data', 'contents'),
+            State('upload-data', 'filename')
+        )
+        def update_output(contents, filename):
+            if contents is not None:
+                content_type, content_string = contents.split(',')
+                decoded = base64.b64decode(content_string)
+                try:
+                    if 'csv' in filename:
+                        # Assume that the user uploaded a CSV file
+                        df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+                    elif 'xls' in filename:
+                        # Assume that the user uploaded an excel file
+                        df = pd.read_excel(io.BytesIO(decoded))
+                    else:
+                        return 'Format de fichier non supporté. Utilisez CSV ou Excel.', [], None
+                        
+                    # Mise à jour des données du dashboard
+                    self.data = df
+                    
+                    # Mise à jour des options de colonnes
+                    options = [{'label': col, 'value': col} for col in df.columns 
+                              if df[col].dtype == 'object']
+                    
+                    return html.Div([
+                        f'Fichier "{filename}" chargé avec succès. {len(df)} lignes et {len(df.columns)} colonnes.'
+                    ]), options, None
+                except Exception as e:
+                    return html.Div([
+                        'Erreur lors du traitement du fichier: ' + str(e)
+                    ]), [], None
+            return '', [], None
         
         # Callback pour mettre à jour les valeurs du filtre
         @self.app.callback(
@@ -413,61 +405,55 @@ def update_output(contents, filename):
                 ]) for i in range(min(len(df_display), 10))]
             )
         
-        # Callbacks pour les exportations - Corrigé pour utiliser directement les données
+        # Callback pour les exportations
         @self.app.callback(
-    Output('export-status', 'children'),
-    [Input('btn-export-tableau', 'n_clicks'),
-     Input('btn-export-powerbi', 'n_clicks')]
-)
-# Callback pour l'exportation des données
-@self.app.callback(
-    Output('export-status', 'children'),
-    [Input('btn-export-tableau', 'n_clicks'),
-     Input('btn-export-powerbi', 'n_clicks')]
-)
-def export_data(tableau_clicks, powerbi_clicks):
-    if tableau_clicks is None and powerbi_clicks is None:
-        return ""
-    
-    ctx = callback_context
-    if not ctx.triggered:
-        return ""
-    
-    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    
-    if button_id == "btn-export-tableau" and tableau_clicks > 0:
-        # Au lieu d'enregistrer sur le serveur, créer un lien de téléchargement
-        csv_string = self.data.to_csv(index=False, encoding='utf-8')
-        csv_b64 = base64.b64encode(csv_string.encode()).decode()
-        href = f'data:text/csv;charset=utf-8;base64,{csv_b64}'
-        
-        return html.Div([
-            html.A(
-                'Télécharger les données pour Tableau (CSV)',
-                download="dashboard_export_tableau.csv",
-                href=href,
-                target="_blank",
-                style={'color': 'green', 'textDecoration': 'underline'}
-            )
-        ])
-    
-    elif button_id == "btn-export-powerbi" and powerbi_clicks > 0:
-        # Même chose pour Power BI
-        csv_string = self.data.to_csv(index=False, encoding='utf-8')
-        csv_b64 = base64.b64encode(csv_string.encode()).decode()
-        href = f'data:text/csv;charset=utf-8;base64,{csv_b64}'
-        
-        return html.Div([
-            html.A(
-                'Télécharger les données pour Power BI (CSV)',
-                download="dashboard_export_powerbi.csv",
-                href=href,
-                target="_blank",
-                style={'color': 'green', 'textDecoration': 'underline'}
-            )
-        ])
-    
-    return ""
+            Output('export-status', 'children'),
+            [Input('btn-export-tableau', 'n_clicks'),
+             Input('btn-export-powerbi', 'n_clicks')]
+        )
+        def export_data(tableau_clicks, powerbi_clicks):
+            if tableau_clicks is None and powerbi_clicks is None:
+                return ""
+            
+            ctx = callback_context
+            if not ctx.triggered:
+                return ""
+            
+            button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            
+            if button_id == "btn-export-tableau" and tableau_clicks > 0:
+                # Au lieu d'enregistrer sur le serveur, créer un lien de téléchargement
+                csv_string = self.data.to_csv(index=False, encoding='utf-8')
+                csv_b64 = base64.b64encode(csv_string.encode()).decode()
+                href = f'data:text/csv;charset=utf-8;base64,{csv_b64}'
+                
+                return html.Div([
+                    html.A(
+                        'Télécharger les données pour Tableau (CSV)',
+                        download="dashboard_export_tableau.csv",
+                        href=href,
+                        target="_blank",
+                        style={'color': 'green', 'textDecoration': 'underline'}
+                    )
+                ])
+            
+            elif button_id == "btn-export-powerbi" and powerbi_clicks > 0:
+                # Même chose pour Power BI
+                csv_string = self.data.to_csv(index=False, encoding='utf-8')
+                csv_b64 = base64.b64encode(csv_string.encode()).decode()
+                href = f'data:text/csv;charset=utf-8;base64,{csv_b64}'
+                
+                return html.Div([
+                    html.A(
+                        'Télécharger les données pour Power BI (CSV)',
+                        download="dashboard_export_powerbi.csv",
+                        href=href,
+                        target="_blank",
+                        style={'color': 'green', 'textDecoration': 'underline'}
+                    )
+                ])
+            
+            return ""
     
     def run_dashboard(self, debug=True, port=8050):
         """Lance le dashboard"""
