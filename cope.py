@@ -222,40 +222,40 @@ class DashboardCreator:
             ], style={'marginTop': '20px'})
         ])
         
-       # Modification du callback d'upload pour mieux mettre à jour les filtres
-@self.app.callback(
-    [Output('upload-status', 'children'),
-     Output('column-filter', 'options'),
-     Output('column-filter', 'value')],
-    Input('upload-data', 'contents'),
-    State('upload-data', 'filename')
-)
-def update_output(contents, filename):
-    if contents is not None:
-        content_type, content_string = contents.split(',')
-        decoded = base64.b64decode(content_string)
-        try:
-            if 'csv' in filename.lower():
-                df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-            elif 'xls' in filename.lower():
-                df = pd.read_excel(io.BytesIO(decoded))
-            else:
-                return 'Format de fichier non supporté. Utilisez CSV ou Excel.', [], None
-                
-            # Mise à jour des données du dashboard
-            self.data = df
-            
-            # Mise à jour des options de colonnes - ici on inclut TOUTES les colonnes
-            options = [{'label': col, 'value': col} for col in df.columns]
-            
-            return html.Div([
-                f'Fichier "{filename}" chargé avec succès. {len(df)} lignes et {len(df.columns)} colonnes.'
-            ]), options, options[0]['value'] if options else None  # Sélectionner la première colonne par défaut
-        except Exception as e:
-            return html.Div([
-                'Erreur lors du traitement du fichier: ' + str(e)
-            ]), [], None
-    return '', [], None
+        # Callback d'upload pour mettre à jour les filtres
+        @self.app.callback(
+            [Output('upload-status', 'children'),
+             Output('column-filter', 'options'),
+             Output('column-filter', 'value')],
+            Input('upload-data', 'contents'),
+            State('upload-data', 'filename')
+        )
+        def update_output(contents, filename):
+            if contents is not None:
+                content_type, content_string = contents.split(',')
+                decoded = base64.b64decode(content_string)
+                try:
+                    if 'csv' in filename.lower():
+                        df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+                    elif 'xls' in filename.lower():
+                        df = pd.read_excel(io.BytesIO(decoded))
+                    else:
+                        return 'Format de fichier non supporté. Utilisez CSV ou Excel.', [], None
+                        
+                    # Mise à jour des données du dashboard
+                    self.data = df
+                    
+                    # Mise à jour des options de colonnes - ici on inclut TOUTES les colonnes
+                    options = [{'label': col, 'value': col} for col in df.columns]
+                    
+                    return html.Div([
+                        f'Fichier "{filename}" chargé avec succès. {len(df)} lignes et {len(df.columns)} colonnes.'
+                    ]), options, options[0]['value'] if options else None  # Sélectionner la première colonne par défaut
+                except Exception as e:
+                    return html.Div([
+                        'Erreur lors du traitement du fichier: ' + str(e)
+                    ]), [], None
+            return '', [], None
         
         # Callback pour mettre à jour les valeurs du filtre
         @self.app.callback(
@@ -286,84 +286,83 @@ def update_output(contents, filename):
             ]
         
         # Callback pour mettre à jour le graphique 1
-        # Amélioration du callback pour le graphique 1
-@self.app.callback(
-    Output('graph1', 'figure'),
-    [Input('column-filter', 'value'),
-     Input('value-filter', 'value')]
-)
-def update_graph1(column, values):
-    # Si pas de colonne sélectionnée ou pas de valeurs, afficher une explication
-    if column is None or values is None or values == []:
-        # Créer un graphique par défaut plus descriptif
-        fig = px.bar(
-            self.data.iloc[:10], 
-            x=self.data.columns[0], 
-            y=self.data.columns[1] if len(self.data.columns) > 1 else self.data.columns[0],
-            title="Sélectionnez une colonne et des valeurs pour visualiser les données"
+        @self.app.callback(
+            Output('graph1', 'figure'),
+            [Input('column-filter', 'value'),
+             Input('value-filter', 'value')]
         )
-        fig.update_layout(
-            xaxis_title=self.data.columns[0],
-            yaxis_title=self.data.columns[1] if len(self.data.columns) > 1 else "Count",
-            template="plotly_white"
-        )
-        return fig
-    
-    # Filtrer les données selon la sélection
-    if isinstance(values, list):
-        filtered_data = self.data[self.data[column].isin(values)]
-    else:
-        filtered_data = self.data[self.data[column] == values]
-    
-    # S'assurer que filtered_data n'est pas vide
-    if filtered_data.empty:
-        fig = px.bar(
-            self.data.iloc[:10],
-            x=self.data.columns[0],
-            y=self.data.columns[1] if len(self.data.columns) > 1 else self.data.columns[0],
-            title="Aucune donnée disponible pour cette sélection"
-        )
-        return fig
-    
-    # Créer un graphique basé sur les données filtrées
-    numeric_cols = filtered_data.select_dtypes(include=['number']).columns
-    if len(numeric_cols) > 0:
-        # Utiliser la première colonne numérique
-        y_column = numeric_cols[0]
-        
-        # Créer un graphique plus descriptif
-        fig = px.bar(
-            filtered_data,
-            x=column,
-            y=y_column,
-            title=f"Distribution de {y_column} par {column}",
-            labels={column: column, y_column: y_column},
-            text_auto=True  # Afficher les valeurs sur les barres
-        )
-        fig.update_layout(
-            xaxis_title=column,
-            yaxis_title=y_column,
-            legend_title="Légende",
-            template="plotly_white"
-        )
-        return fig
-    else:
-        # Utiliser un compte si pas de colonne numérique
-        counts = filtered_data[column].value_counts().reset_index()
-        counts.columns = [column, 'count']
-        fig = px.bar(
-            counts,
-            x=column,
-            y='count',
-            title=f"Nombre d'occurrences par {column}",
-            text_auto=True  # Afficher les valeurs sur les barres
-        )
-        fig.update_layout(
-            xaxis_title=column,
-            yaxis_title="Nombre d'occurrences",
-            template="plotly_white"
-        )
-        return fig
+        def update_graph1(column, values):
+            # Si pas de colonne sélectionnée ou pas de valeurs, afficher une explication
+            if column is None or values is None or values == []:
+                # Créer un graphique par défaut plus descriptif
+                fig = px.bar(
+                    self.data.iloc[:10], 
+                    x=self.data.columns[0], 
+                    y=self.data.columns[1] if len(self.data.columns) > 1 else self.data.columns[0],
+                    title="Sélectionnez une colonne et des valeurs pour visualiser les données"
+                )
+                fig.update_layout(
+                    xaxis_title=self.data.columns[0],
+                    yaxis_title=self.data.columns[1] if len(self.data.columns) > 1 else "Count",
+                    template="plotly_white"
+                )
+                return fig
+            
+            # Filtrer les données selon la sélection
+            if isinstance(values, list):
+                filtered_data = self.data[self.data[column].isin(values)]
+            else:
+                filtered_data = self.data[self.data[column] == values]
+            
+            # S'assurer que filtered_data n'est pas vide
+            if filtered_data.empty:
+                fig = px.bar(
+                    self.data.iloc[:10],
+                    x=self.data.columns[0],
+                    y=self.data.columns[1] if len(self.data.columns) > 1 else self.data.columns[0],
+                    title="Aucune donnée disponible pour cette sélection"
+                )
+                return fig
+            
+            # Créer un graphique basé sur les données filtrées
+            numeric_cols = filtered_data.select_dtypes(include=['number']).columns
+            if len(numeric_cols) > 0:
+                # Utiliser la première colonne numérique
+                y_column = numeric_cols[0]
+                
+                # Créer un graphique plus descriptif
+                fig = px.bar(
+                    filtered_data,
+                    x=column,
+                    y=y_column,
+                    title=f"Distribution de {y_column} par {column}",
+                    labels={column: column, y_column: y_column},
+                    text_auto=True  # Afficher les valeurs sur les barres
+                )
+                fig.update_layout(
+                    xaxis_title=column,
+                    yaxis_title=y_column,
+                    legend_title="Légende",
+                    template="plotly_white"
+                )
+                return fig
+            else:
+                # Utiliser un compte si pas de colonne numérique
+                counts = filtered_data[column].value_counts().reset_index()
+                counts.columns = [column, 'count']
+                fig = px.bar(
+                    counts,
+                    x=column,
+                    y='count',
+                    title=f"Nombre d'occurrences par {column}",
+                    text_auto=True  # Afficher les valeurs sur les barres
+                )
+                fig.update_layout(
+                    xaxis_title=column,
+                    yaxis_title="Nombre d'occurrences",
+                    template="plotly_white"
+                )
+                return fig
         
         # Callback pour mettre à jour le graphique 2
         @self.app.callback(
@@ -414,43 +413,42 @@ def update_graph1(column, values):
                 return fig
         
         # Callback pour mettre à jour le tableau de données
-        # Amélioration de l'affichage du tableau de données
-@self.app.callback(
-    Output('data-table', 'children'),
-    [Input('column-filter', 'value'),
-     Input('value-filter', 'value')]
-)
-def update_table(column, values):
-    if column is None or values is None or values == []:
-        df_display = self.data.head(10)
-        table_title = "Aperçu des 10 premières lignes de données"
-    else:
-        # Filtrer les données selon la sélection
-        if isinstance(values, list):
-            df_display = self.data[self.data[column].isin(values)].head(20)
-            table_title = f"Données filtrées pour {column} = {', '.join(values)} (20 premières lignes)"
-        else:
-            df_display = self.data[self.data[column] == values].head(20)
-            table_title = f"Données filtrées pour {column} = {values} (20 premières lignes)"
-    
-    # S'assurer que df_display n'est pas vide
-    if df_display.empty:
-        df_display = self.data.head(10)
-        table_title = "Aucune donnée ne correspond à ce filtre - Affichage des 10 premières lignes"
-    
-    return html.Div([
-        html.H4(table_title, style={'textAlign': 'center'}),
-        html.Table(
-            # En-tête
-            [html.Tr([html.Th(col, style={'backgroundColor': '#f0f0f0', 'fontWeight': 'bold'}) 
-                      for col in df_display.columns])] +
-            # Corps
-            [html.Tr([
-                html.Td(df_display.iloc[i][col]) for col in df_display.columns
-            ], style={'backgroundColor': '#f9f9f9' if i % 2 else 'white'}) 
-             for i in range(min(len(df_display), 20))]
-        , style={'width': '100%', 'border': '1px solid #ddd', 'borderCollapse': 'collapse'})
-    ])
+        @self.app.callback(
+            Output('data-table', 'children'),
+            [Input('column-filter', 'value'),
+             Input('value-filter', 'value')]
+        )
+        def update_table(column, values):
+            if column is None or values is None or values == []:
+                df_display = self.data.head(10)
+                table_title = "Aperçu des 10 premières lignes de données"
+            else:
+                # Filtrer les données selon la sélection
+                if isinstance(values, list):
+                    df_display = self.data[self.data[column].isin(values)].head(20)
+                    table_title = f"Données filtrées pour {column} = {', '.join(values)} (20 premières lignes)"
+                else:
+                    df_display = self.data[self.data[column] == values].head(20)
+                    table_title = f"Données filtrées pour {column} = {values} (20 premières lignes)"
+            
+            # S'assurer que df_display n'est pas vide
+            if df_display.empty:
+                df_display = self.data.head(10)
+                table_title = "Aucune donnée ne correspond à ce filtre - Affichage des 10 premières lignes"
+            
+            return html.Div([
+                html.H4(table_title, style={'textAlign': 'center'}),
+                html.Table(
+                    # En-tête
+                    [html.Tr([html.Th(col, style={'backgroundColor': '#f0f0f0', 'fontWeight': 'bold'}) 
+                              for col in df_display.columns])] +
+                    # Corps
+                    [html.Tr([
+                        html.Td(df_display.iloc[i][col]) for col in df_display.columns
+                    ], style={'backgroundColor': '#f9f9f9' if i % 2 else 'white'}) 
+                     for i in range(min(len(df_display), 20))]
+                , style={'width': '100%', 'border': '1px solid #ddd', 'borderCollapse': 'collapse'})
+            ])
         
         # Callback pour les exportations
         @self.app.callback(
