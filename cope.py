@@ -419,6 +419,12 @@ def update_output(contents, filename):
     [Input('btn-export-tableau', 'n_clicks'),
      Input('btn-export-powerbi', 'n_clicks')]
 )
+# Callback pour l'exportation des données
+@self.app.callback(
+    Output('export-status', 'children'),
+    [Input('btn-export-tableau', 'n_clicks'),
+     Input('btn-export-powerbi', 'n_clicks')]
+)
 def export_data(tableau_clicks, powerbi_clicks):
     if tableau_clicks is None and powerbi_clicks is None:
         return ""
