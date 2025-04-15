@@ -281,7 +281,7 @@ def render_import_page():
             with col1:
                 if st.button("Analyser les données", key="analyze_btn"):
                     st.session_state['page'] = "Analyser les données"
-                    st.experimental_rerun()
+                    st.rerun()
             with col2:
                 st.markdown(get_csv_download_link(df), unsafe_allow_html=True)
 
@@ -292,7 +292,7 @@ def render_analysis_page():
         st.warning("Aucune donnée à analyser. Veuillez d'abord importer un fichier.")
         if st.button("Aller à l'importation"):
             st.session_state['page'] = "Importer des données"
-            st.experimental_rerun()
+            st.rerun()
         return
     
     df = st.session_state['data']
@@ -367,7 +367,7 @@ def render_history_page():
             st.session_state['data'] = pd.DataFrame(json.loads(selected_row['data_preview']))
             st.session_state['filename'] = selected_row['filename']
             st.session_state['page'] = "Analyser les données"
-            st.experimental_rerun()
+            st.rerun()
 
 if __name__ == "__main__":
     # Initialiser la navigation par pages si ce n'est pas déjà fait
