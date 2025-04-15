@@ -1,551 +1,379 @@
-# Importation des bibliothèques nécessaires
+import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-from dash import Dash, html, dcc, callback, Output, Input, callback_context
 import plotly.express as px
 import plotly.graph_objects as go
-from sqlalchemy import create_engine
-import os
-import json
-import base64
 import io
-from dash import State
+import base64
+import PyPDF2
+import json
+import sqlite3
+from datetime import datetime
 
-# Classe pour gérer la connexion et l'extraction des données
-class DataConnector:
-    def __init__(self, source_type, connection_params=None):
-        """
-        Initialise le connecteur de données
-        source_type: 'csv', 'excel', 'sql', 'api'
-        connection_params: paramètres de connexion spécifiques à la source
-        """
-        self.source_type = source_type
-        self.connection_params = connection_params
-        self.data = None
-        
-    def connect(self):
-        """Établit la connexion à la source de données"""
-        try:
-            if self.source_type == 'csv':
-                self.data = pd.read_csv(self.connection_params['file_path'])
-                return True
-            elif self.source_type == 'excel':
-                self.data = pd.read_excel(self.connection_params['file_path'], 
-                                         sheet_name=self.connection_params.get('sheet_name', 0))
-                return True
-            elif self.source_type == 'sql':
-                engine = create_engine(self.connection_params['connection_string'])
-                self.data = pd.read_sql(self.connection_params['query'], engine)
-                return True
-            # Ajout d'un type 'memory' pour utiliser des données déjà en mémoire
-            elif self.source_type == 'memory':
-                # Pas besoin de connexion, les données sont déjà fournies
-                return True
-            else:
-                print(f"Source type {self.source_type} not supported yet")
-                return False
-        except Exception as e:
-            print(f"Error connecting to data source: {e}")
-            return False
-    
-    def get_data(self):
-        """Retourne les données obtenues"""
-        return self.data
-    
-    def set_data(self, data):
-        """Définit les données directement"""
-        self.data = data
-        return self
-    
-    def export_to_tableau(self, output_path):
-        """Exporte les données dans un format compatible avec Tableau (.hyper ou .csv)"""
-        if self.data is not None:
-            if output_path.endswith('.csv'):
-                self.data.to_csv(output_path, index=False)
-                print(f"Data exported to Tableau format at {output_path}")
-                return True
-            else:
-                # Pour les formats .hyper, il faudrait utiliser l'API Tableau Hyper
-                print("Hyper format requires Tableau Hyper API, exporting as CSV instead")
-                csv_path = output_path.replace('.hyper', '.csv')
-                self.data.to_csv(csv_path, index=False)
-                print(f"Data exported to Tableau CSV format at {csv_path}")
-                return True
-        return False
-    
-    def export_to_powerbi(self, output_path):
-        """Exporte les données dans un format compatible avec Power BI (.pbix via .csv)"""
-        if self.data is not None:
-            # Power BI peut importer directement depuis CSV
-            csv_path = output_path.replace('.pbix', '.csv')
-            self.data.to_csv(csv_path, index=False)
-            print(f"Data exported for Power BI import at {csv_path}")
-            
-            # Création d'un fichier de métadonnées pour faciliter l'import
-            metadata = {
-                "columns": list(self.data.columns),
-                "data_types": {col: str(self.data[col].dtype) for col in self.data.columns}
-            }
-            
-            with open(csv_path + '.metadata.json', 'w') as f:
-                json.dump(metadata, f)
-            
-            print("Metadata file created for Power BI")
-            return True
-        return False
+# Configuration de la page
+st.set_page_config(
+    page_title="Data Analytics Dashboard",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Classe pour la préparation et la transformation des données
-class DataProcessor:
-    def __init__(self, data):
-        """
-        Initialise le processeur de données
-        data: DataFrame pandas contenant les données brutes
-        """
-        self.raw_data = data
-        self.processed_data = data.copy()
-    
-    def clean_data(self):
-        """Nettoie les données (valeurs manquantes, doublons, erreurs)"""
-        # Supprimer les lignes avec des valeurs manquantes
-        self.processed_data = self.processed_data.dropna()
-        
-        # Supprimer les doublons
-        self.processed_data = self.processed_data.drop_duplicates()
-        
-        return self
-    
-    def transform_data(self, transformations=None):
-        """Applique des transformations aux données"""
-        if transformations:
-            for col, transform_func in transformations.items():
-                if col in self.processed_data.columns:
-                    self.processed_data[col] = self.processed_data[col].apply(transform_func)
-        
-        return self
-    
-    def aggregate_data(self, group_by, agg_dict):
-        """Agrège les données selon les spécifications"""
-        self.processed_data = self.processed_data.groupby(group_by).agg(agg_dict).reset_index()
-        return self
-    
-    def get_processed_data(self):
-        """Retourne les données transformées"""
-        return self.processed_data
-
-# Classe pour créer le dashboard avec Dash
-class DashboardCreator:
-    def __init__(self, data):
-        """
-        Initialise le créateur de dashboard
-        data: DataFrame pandas contenant les données à visualiser
-        """
-        self.data = data
-        self.app = Dash(__name__)
-        
-    def create_layout(self, title="Dashboard Python"):
-        """Crée la mise en page du dashboard"""
-        # Composant pour télécharger des fichiers
-        upload_component = html.Div([
-            html.H3("Charger vos données"),
-            dcc.Upload(
-                id='upload-data',
-                children=html.Div([
-                    'Glissez-déposez ou ',
-                    html.A('sélectionnez un fichier CSV ou Excel')
-                ]),
-                style={
-                    'width': '100%',
-                    'height': '60px',
-                    'lineHeight': '60px',
-                    'borderWidth': '1px',
-                    'borderStyle': 'dashed',
-                    'borderRadius': '5px',
-                    'textAlign': 'center',
-                    'margin': '10px'
-                },
-                multiple=False
-            ),
-            html.Div(id='upload-status')
-        ])
-        
-        # Créer un dropdown initial vide mais avec l'ID défini
-        default_filter_values = html.Div([
-            html.Label("Sélectionner une valeur:"),
-            dcc.Dropdown(
-                id='value-filter',
-                options=[],
-                value=None
-            )
-        ], id='filter-value-container')
-        
-        self.app.layout = html.Div([
-            html.H1(title, style={'textAlign': 'center'}),
-            upload_component,
-            
-            html.Div([
-                html.Div([
-                    html.H3("Filtres"),
-                    # Exemple de filtre par colonne (à adapter selon vos données)
-                    html.Label("Sélectionner une colonne:"),
-                    dcc.Dropdown(
-                        id='column-filter',
-                        options=[{'label': col, 'value': col} for col in self.data.columns 
-                                if self.data[col].dtype == 'object'],
-                        value=None
-                    ),
-                    default_filter_values  # Ajout de l'élément initial vide mais avec ID
-                ], style={'width': '30%', 'display': 'inline-block', 'vertical-align': 'top'}),
-                
-                html.Div([
-                    html.H3("Graphiques"),
-                    dcc.Tabs([
-                        dcc.Tab(label="Graphique 1", children=[
-                            dcc.Graph(id='graph1')
-                        ]),
-                        dcc.Tab(label="Graphique 2", children=[
-                            dcc.Graph(id='graph2')
-                        ]),
-                        dcc.Tab(label="Tableau de données", children=[
-                            html.Div(id='data-table')
-                        ])
-                    ])
-                ], style={'width': '70%', 'display': 'inline-block'})
-            ]),
-            
-            html.Div([
-                html.H3("Exporter les données"),
-                html.Button("Exporter pour Tableau", id="btn-export-tableau", n_clicks=0),  # Initialisation n_clicks
-                html.Button("Exporter pour Power BI", id="btn-export-powerbi", n_clicks=0, style={'marginLeft': '10px'}),  # Initialisation n_clicks
-                html.Div(id='export-status')
-            ], style={'marginTop': '20px'})
-        ])
-        
-        # Callback d'upload pour mettre à jour les filtres
-        @self.app.callback(
-            [Output('upload-status', 'children'),
-             Output('column-filter', 'options'),
-             Output('column-filter', 'value')],
-            Input('upload-data', 'contents'),
-            State('upload-data', 'filename')
-        )
-        def update_output(contents, filename):
-            if contents is not None:
-                content_type, content_string = contents.split(',')
-                decoded = base64.b64decode(content_string)
-                try:
-                    if 'csv' in filename.lower():
-                        df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-                    elif 'xls' in filename.lower():
-                        df = pd.read_excel(io.BytesIO(decoded))
-                    else:
-                        return 'Format de fichier non supporté. Utilisez CSV ou Excel.', [], None
-                        
-                    # Mise à jour des données du dashboard
-                    self.data = df
-                    
-                    # Mise à jour des options de colonnes - ici on inclut TOUTES les colonnes
-                    options = [{'label': col, 'value': col} for col in df.columns]
-                    
-                    return html.Div([
-                        f'Fichier "{filename}" chargé avec succès. {len(df)} lignes et {len(df.columns)} colonnes.'
-                    ]), options, options[0]['value'] if options else None  # Sélectionner la première colonne par défaut
-                except Exception as e:
-                    return html.Div([
-                        'Erreur lors du traitement du fichier: ' + str(e)
-                    ]), [], None
-            return '', [], None
-        
-        # Callback pour mettre à jour les valeurs du filtre
-        @self.app.callback(
-            Output('filter-value-container', 'children'),
-            Input('column-filter', 'value')
-        )
-        def update_filter_values(selected_column):
-            if selected_column is None:
-                # Retourner un dropdown vide mais avec l'ID défini
-                return [
-                    html.Label("Sélectionner une valeur:"),
-                    dcc.Dropdown(
-                        id='value-filter',
-                        options=[],
-                        value=None
-                    )
-                ]
-            
-            values = sorted(self.data[selected_column].unique())
-            return [
-                html.Label("Sélectionner une valeur:"),
-                dcc.Dropdown(
-                    id='value-filter',
-                    options=[{'label': str(val), 'value': str(val)} for val in values],
-                    value=str(values[0]) if len(values) > 0 else None,
-                    multi=True
-                )
-            ]
-        
-        # Callback pour mettre à jour le graphique 1
-        @self.app.callback(
-            Output('graph1', 'figure'),
-            [Input('column-filter', 'value'),
-             Input('value-filter', 'value')]
-        )
-        def update_graph1(column, values):
-            # Si pas de colonne sélectionnée ou pas de valeurs, afficher une explication
-            if column is None or values is None or values == []:
-                # Créer un graphique par défaut plus descriptif
-                fig = px.bar(
-                    self.data.iloc[:10], 
-                    x=self.data.columns[0], 
-                    y=self.data.columns[1] if len(self.data.columns) > 1 else self.data.columns[0],
-                    title="Sélectionnez une colonne et des valeurs pour visualiser les données"
-                )
-                fig.update_layout(
-                    xaxis_title=self.data.columns[0],
-                    yaxis_title=self.data.columns[1] if len(self.data.columns) > 1 else "Count",
-                    template="plotly_white"
-                )
-                return fig
-            
-            # Filtrer les données selon la sélection
-            if isinstance(values, list):
-                filtered_data = self.data[self.data[column].isin(values)]
-            else:
-                filtered_data = self.data[self.data[column] == values]
-            
-            # S'assurer que filtered_data n'est pas vide
-            if filtered_data.empty:
-                fig = px.bar(
-                    self.data.iloc[:10],
-                    x=self.data.columns[0],
-                    y=self.data.columns[1] if len(self.data.columns) > 1 else self.data.columns[0],
-                    title="Aucune donnée disponible pour cette sélection"
-                )
-                return fig
-            
-            # Créer un graphique basé sur les données filtrées
-            numeric_cols = filtered_data.select_dtypes(include=['number']).columns
-            if len(numeric_cols) > 0:
-                # Utiliser la première colonne numérique
-                y_column = numeric_cols[0]
-                
-                # Créer un graphique plus descriptif
-                fig = px.bar(
-                    filtered_data,
-                    x=column,
-                    y=y_column,
-                    title=f"Distribution de {y_column} par {column}",
-                    labels={column: column, y_column: y_column},
-                    text_auto=True  # Afficher les valeurs sur les barres
-                )
-                fig.update_layout(
-                    xaxis_title=column,
-                    yaxis_title=y_column,
-                    legend_title="Légende",
-                    template="plotly_white"
-                )
-                return fig
-            else:
-                # Utiliser un compte si pas de colonne numérique
-                counts = filtered_data[column].value_counts().reset_index()
-                counts.columns = [column, 'count']
-                fig = px.bar(
-                    counts,
-                    x=column,
-                    y='count',
-                    title=f"Nombre d'occurrences par {column}",
-                    text_auto=True  # Afficher les valeurs sur les barres
-                )
-                fig.update_layout(
-                    xaxis_title=column,
-                    yaxis_title="Nombre d'occurrences",
-                    template="plotly_white"
-                )
-                return fig
-        
-        # Callback pour mettre à jour le graphique 2
-        @self.app.callback(
-            Output('graph2', 'figure'),
-            [Input('column-filter', 'value'),
-             Input('value-filter', 'value')]
-        )
-        def update_graph2(column, values):
-            # Graphique par défaut
-            if column is None or values is None or values == []:
-                numeric_cols = self.data.select_dtypes(include=['number']).columns
-                if len(numeric_cols) >= 2:
-                    fig = px.scatter(self.data.iloc[:50], x=numeric_cols[0], y=numeric_cols[1],
-                                    title="Exemple de nuage de points")
-                else:
-                    fig = px.line(self.data.iloc[:20], title="Exemple de graphique linéaire")
-                return fig
-            
-            # Filtrer les données selon la sélection
-            if isinstance(values, list):
-                filtered_data = self.data[self.data[column].isin(values)]
-            else:
-                filtered_data = self.data[self.data[column] == values]
-            
-            # S'assurer que filtered_data n'est pas vide
-            if filtered_data.empty:
-                numeric_cols = self.data.select_dtypes(include=['number']).columns
-                if len(numeric_cols) >= 2:
-                    fig = px.scatter(self.data.iloc[:50], x=numeric_cols[0], y=numeric_cols[1],
-                                    title="Données filtrées indisponibles - Graphique par défaut")
-                else:
-                    fig = px.line(self.data.iloc[:20], title="Données filtrées indisponibles - Graphique par défaut")
-                return fig
-            
-            # Créer un graphique basé sur les données filtrées
-            numeric_cols = filtered_data.select_dtypes(include=['number']).columns
-            if len(numeric_cols) >= 2:
-                fig = px.scatter(filtered_data, x=numeric_cols[0], y=numeric_cols[1],
-                                color=column if len(filtered_data[column].unique()) <= 10 else None,
-                                title=f"Relation entre {numeric_cols[0]} et {numeric_cols[1]}")
-                return fig
-            else:
-                # Utiliser un autre type de graphique
-                counts = filtered_data[column].value_counts().reset_index()
-                counts.columns = [column, 'count']
-                fig = px.pie(counts, values='count', names=column, 
-                            title=f"Répartition des valeurs de {column}")
-                return fig
-        
-        # Callback pour mettre à jour le tableau de données
-        @self.app.callback(
-            Output('data-table', 'children'),
-            [Input('column-filter', 'value'),
-             Input('value-filter', 'value')]
-        )
-        def update_table(column, values):
-            if column is None or values is None or values == []:
-                df_display = self.data.head(10)
-                table_title = "Aperçu des 10 premières lignes de données"
-            else:
-                # Filtrer les données selon la sélection
-                if isinstance(values, list):
-                    df_display = self.data[self.data[column].isin(values)].head(20)
-                    table_title = f"Données filtrées pour {column} = {', '.join(values)} (20 premières lignes)"
-                else:
-                    df_display = self.data[self.data[column] == values].head(20)
-                    table_title = f"Données filtrées pour {column} = {values} (20 premières lignes)"
-            
-            # S'assurer que df_display n'est pas vide
-            if df_display.empty:
-                df_display = self.data.head(10)
-                table_title = "Aucune donnée ne correspond à ce filtre - Affichage des 10 premières lignes"
-            
-            return html.Div([
-                html.H4(table_title, style={'textAlign': 'center'}),
-                html.Table(
-                    # En-tête
-                    [html.Tr([html.Th(col, style={'backgroundColor': '#f0f0f0', 'fontWeight': 'bold'}) 
-                              for col in df_display.columns])] +
-                    # Corps
-                    [html.Tr([
-                        html.Td(df_display.iloc[i][col]) for col in df_display.columns
-                    ], style={'backgroundColor': '#f9f9f9' if i % 2 else 'white'}) 
-                     for i in range(min(len(df_display), 20))]
-                , style={'width': '100%', 'border': '1px solid #ddd', 'borderCollapse': 'collapse'})
-            ])
-        
-        # Callback pour les exportations
-        @self.app.callback(
-            Output('export-status', 'children'),
-            [Input('btn-export-tableau', 'n_clicks'),
-             Input('btn-export-powerbi', 'n_clicks')]
-        )
-        def export_data(tableau_clicks, powerbi_clicks):
-            if tableau_clicks is None and powerbi_clicks is None:
-                return ""
-            
-            ctx = callback_context
-            if not ctx.triggered:
-                return ""
-            
-            button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-            
-            if button_id == "btn-export-tableau" and tableau_clicks > 0:
-                # Au lieu d'enregistrer sur le serveur, créer un lien de téléchargement
-                csv_string = self.data.to_csv(index=False, encoding='utf-8')
-                csv_b64 = base64.b64encode(csv_string.encode()).decode()
-                href = f'data:text/csv;charset=utf-8;base64,{csv_b64}'
-                
-                return html.Div([
-                    html.A(
-                        'Télécharger les données pour Tableau (CSV)',
-                        download="dashboard_export_tableau.csv",
-                        href=href,
-                        target="_blank",
-                        style={'color': 'green', 'textDecoration': 'underline'}
-                    )
-                ])
-            
-            elif button_id == "btn-export-powerbi" and powerbi_clicks > 0:
-                # Même chose pour Power BI
-                csv_string = self.data.to_csv(index=False, encoding='utf-8')
-                csv_b64 = base64.b64encode(csv_string.encode()).decode()
-                href = f'data:text/csv;charset=utf-8;base64,{csv_b64}'
-                
-                return html.Div([
-                    html.A(
-                        'Télécharger les données pour Power BI (CSV)',
-                        download="dashboard_export_powerbi.csv",
-                        href=href,
-                        target="_blank",
-                        style={'color': 'green', 'textDecoration': 'underline'}
-                    )
-                ])
-            
-            return ""
-    
-    def run_dashboard(self, debug=True, port=8050):
-        """Lance le dashboard"""
-        self.app.run(debug=debug, port=port)
-
-# Exemple d'utilisation du code ci-dessus
-def main():
-    # Création de données d'exemple (à remplacer par vos propres données)
-    data = {
-        'Date': pd.date_range(start='2023-01-01', periods=100),
-        'Catégorie': np.random.choice(['A', 'B', 'C', 'D'], 100),
-        'Région': np.random.choice(['Nord', 'Sud', 'Est', 'Ouest', 'Centre'], 100),
-        'Ventes': np.random.randint(100, 1000, 100),
-        'Profit': np.random.randint(-100, 500, 100),
-        'Clients': np.random.randint(10, 100, 100)
+# Styles CSS pour améliorer l'apparence
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1E88E5;
+        text-align: center;
+        margin-bottom: 2rem;
     }
-    df = pd.DataFrame(data)
-    
-    # Traitement des données
-    processor = DataProcessor(df)
-    processed_df = (processor
-                    .clean_data()
-                    .transform_data({
-                        'Ventes': lambda x: x * 1.1,  # exemple: augmentation des ventes de 10%
-                        'Date': lambda x: x.strftime('%Y-%m')  # regroupement par mois
-                    })
-                    .aggregate_data(
-                        group_by=['Date', 'Catégorie', 'Région'],
-                        agg_dict={
-                            'Ventes': 'sum',
-                            'Profit': 'sum',
-                            'Clients': 'mean'
-                        }
-                    )
-                    .get_processed_data())
-    
-    # Création et lancement du dashboard
-    dashboard = DashboardCreator(processed_df)
-    dashboard.create_layout(title="Dashboard de Ventes et Profits")
-    
-    print("Dashboard créé avec succès!")
-    print("Utilisez les commandes suivantes pour lancer le dashboard:")
-    print("dashboard.run_dashboard()")
-    
-    return dashboard
+    .section-header {
+        font-size: 1.5rem;
+        color: #1E88E5;
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+    }
+    .success-message {
+        background-color: #D4EDDA;
+        color: #155724;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+    }
+    .stButton button {
+        background-color: #1E88E5;
+        color: white;
+    }
+    .stButton button:hover {
+        background-color: #0D47A1;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Cette condition permet d'exécuter le code uniquement lorsque le script est lancé directement
+# Base de données SQLite
+def init_db():
+    conn = sqlite3.connect('dashboard_data.db')
+    c = conn.cursor()
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS uploads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT,
+        upload_date TEXT,
+        file_type TEXT,
+        data_preview TEXT
+    )
+    ''')
+    conn.commit()
+    conn.close()
+
+def save_upload_to_db(filename, file_type, data_preview):
+    conn = sqlite3.connect('dashboard_data.db')
+    c = conn.cursor()
+    c.execute("INSERT INTO uploads (filename, upload_date, file_type, data_preview) VALUES (?, ?, ?, ?)",
+              (filename, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), file_type, data_preview))
+    conn.commit()
+    conn.close()
+
+def get_uploads():
+    conn = sqlite3.connect('dashboard_data.db')
+    df = pd.read_sql_query("SELECT * FROM uploads ORDER BY upload_date DESC", conn)
+    conn.close()
+    return df
+
+# Initialiser la base de données
+init_db()
+
+# Fonctions d'extraction de données
+def extract_from_excel(file):
+    try:
+        df = pd.read_excel(file)
+        return df
+    except Exception as e:
+        st.error(f"Erreur lors de l'extraction du fichier Excel: {e}")
+        return None
+
+def extract_from_csv(file, encoding='utf-8'):
+    try:
+        # Essayer différents séparateurs
+        for sep in [',', ';', '\t']:
+            try:
+                df = pd.read_csv(file, sep=sep, encoding=encoding)
+                if len(df.columns) > 1:  # S'assurer que les données sont correctement séparées
+                    return df
+            except:
+                pass
+        
+        st.error("Impossible de déterminer le séparateur du fichier CSV")
+        return None
+    except Exception as e:
+        st.error(f"Erreur lors de l'extraction du fichier CSV: {e}")
+        return None
+
+def extract_from_pdf(file):
+    try:
+        pdf_reader = PyPDF2.PdfReader(file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+            
+        # Tenter de structurer les données extraites (simpliste)
+        lines = text.split('\n')
+        data = []
+        headers = []
+        
+        # Chercher des structures tabulaires
+        for line in lines:
+            if not headers and ',' in line:
+                headers = [h.strip() for h in line.split(',')]
+            elif headers and ',' in line:
+                values = [v.strip() for v in line.split(',')]
+                if len(values) == len(headers):
+                    data.append(values)
+        
+        if headers and data:
+            return pd.DataFrame(data, columns=headers)
+        else:
+            st.warning("Données tabulaires non trouvées dans le PDF. Affichage du texte brut.")
+            return pd.DataFrame({'Texte': [text]})
+    except Exception as e:
+        st.error(f"Erreur lors de l'extraction du fichier PDF: {e}")
+        return None
+
+# Fonctions pour générer des visualisations
+def generate_basic_stats(df):
+    stats = {}
+    # Nombre de lignes et colonnes
+    stats["Nombre de lignes"] = df.shape[0]
+    stats["Nombre de colonnes"] = df.shape[1]
+    
+    # Types de données
+    stats["Types de données"] = df.dtypes.astype(str).to_dict()
+    
+    # Valeurs manquantes
+    stats["Valeurs manquantes"] = df.isna().sum().to_dict()
+    
+    return stats
+
+def auto_generate_charts(df):
+    charts = []
+    
+    # Pour chaque colonne numérique, créer un histogramme
+    for col in df.select_dtypes(include=['number']).columns:
+        fig = px.histogram(df, x=col, title=f"Distribution de {col}")
+        charts.append(("histogram", col, fig))
+    
+    # Pour chaque paire de colonnes numériques, créer un scatter plot
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    if len(numeric_cols) >= 2:
+        fig = px.scatter(df, x=numeric_cols[0], y=numeric_cols[1], 
+                         title=f"{numeric_cols[0]} vs {numeric_cols[1]}")
+        charts.append(("scatter", f"{numeric_cols[0]}_vs_{numeric_cols[1]}", fig))
+    
+    # Pour chaque colonne catégorielle, créer un bar chart
+    for col in df.select_dtypes(include=['object', 'category']).columns:
+        if df[col].nunique() < 15:  # Limiter aux colonnes avec moins de 15 valeurs uniques
+            value_counts = df[col].value_counts().head(10)
+            fig = px.bar(x=value_counts.index, y=value_counts.values, 
+                         title=f"Top 10 valeurs pour {col}")
+            fig.update_xaxes(title=col)
+            fig.update_yaxes(title="Fréquence")
+            charts.append(("bar", col, fig))
+    
+    return charts
+
+def generate_powerbi_template(df):
+    # Cette fonction génère un fichier de configuration pour PowerBI
+    # Dans un vrai projet, vous pourriez utiliser l'API PowerBI pour une intégration directe
+    template = {
+        "version": "1.0",
+        "datasets": [
+            {
+                "name": "Dashboard Data",
+                "tables": []
+            }
+        ]
+    }
+    
+    # Ajouter structure de la table
+    table = {
+        "name": "MainData",
+        "columns": []
+    }
+    
+    for col_name, dtype in zip(df.columns, df.dtypes):
+        data_type = "string"
+        if np.issubdtype(dtype, np.number):
+            data_type = "number"
+        elif np.issubdtype(dtype, np.datetime64):
+            data_type = "datetime"
+        
+        table["columns"].append({
+            "name": col_name,
+            "dataType": data_type
+        })
+    
+    template["datasets"][0]["tables"].append(table)
+    
+    return json.dumps(template, indent=2)
+
+def get_powerbi_download_link(template):
+    b64 = base64.b64encode(template.encode()).decode()
+    return f'<a href="data:application/json;base64,{b64}" download="powerbi_template.json">Télécharger le template PowerBI</a>'
+
+def get_csv_download_link(df):
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()
+    return f'<a href="data:file/csv;base64,{b64}" download="data_export.csv">Télécharger les données (CSV)</a>'
+
+# Interface principale
+def main():
+    st.markdown('<h1 class="main-header">Dashboard Analytics</h1>', unsafe_allow_html=True)
+    
+    # Barre latérale
+    st.sidebar.image("https://via.placeholder.com/150x150.png?text=DA", width=150)
+    st.sidebar.markdown("## Menu")
+    page = st.sidebar.radio("", ["Importer des données", "Analyser les données", "Historique d'importation"])
+    
+    if page == "Importer des données":
+        render_import_page()
+    elif page == "Analyser les données":
+        render_analysis_page()
+    else:
+        render_history_page()
+
+def render_import_page():
+    st.markdown('<h2 class="section-header">Importer vos données</h2>', unsafe_allow_html=True)
+    
+    uploaded_file = st.file_uploader("Choisissez un fichier", 
+                                     type=['csv', 'xlsx', 'xls', 'pdf'],
+                                     help="Formats supportés: CSV, Excel, PDF")
+    
+    if uploaded_file is not None:
+        file_details = {"Nom": uploaded_file.name, "Type": uploaded_file.type, "Taille": f"{uploaded_file.size / 1024:.2f} KB"}
+        st.write(file_details)
+        
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        
+        # Extraction des données selon le type de fichier
+        df = None
+        if file_extension in ['xlsx', 'xls']:
+            df = extract_from_excel(uploaded_file)
+        elif file_extension == 'csv':
+            df = extract_from_csv(uploaded_file)
+        elif file_extension == 'pdf':
+            df = extract_from_pdf(uploaded_file)
+        
+        if df is not None:
+            st.markdown('<div class="success-message">Données importées avec succès!</div>', unsafe_allow_html=True)
+            st.markdown('<h3 class="section-header">Aperçu des données</h3>', unsafe_allow_html=True)
+            st.dataframe(df.head(10))
+            
+            # Sauvegarder dans la session
+            st.session_state['data'] = df
+            st.session_state['filename'] = uploaded_file.name
+            
+            # Sauvegarder dans la base de données
+            save_upload_to_db(uploaded_file.name, file_extension, df.head(5).to_json())
+            
+            st.markdown('<h3 class="section-header">Actions</h3>', unsafe_allow_html=True)
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Analyser les données", key="analyze_btn"):
+                    st.session_state['page'] = "Analyser les données"
+                    st.experimental_rerun()
+            with col2:
+                st.markdown(get_csv_download_link(df), unsafe_allow_html=True)
+
+def render_analysis_page():
+    st.markdown('<h2 class="section-header">Analyse des données</h2>', unsafe_allow_html=True)
+    
+    if 'data' not in st.session_state:
+        st.warning("Aucune donnée à analyser. Veuillez d'abord importer un fichier.")
+        if st.button("Aller à l'importation"):
+            st.session_state['page'] = "Importer des données"
+            st.experimental_rerun()
+        return
+    
+    df = st.session_state['data']
+    
+    # Onglets pour différentes analyses
+    tab1, tab2, tab3, tab4 = st.tabs(["Aperçu", "Statistiques", "Visualisations", "PowerBI"])
+    
+    with tab1:
+        st.markdown(f"### Données de: {st.session_state['filename']}")
+        st.dataframe(df)
+        
+    with tab2:
+        st.markdown("### Statistiques descriptives")
+        st.write(df.describe())
+        
+        stats = generate_basic_stats(df)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Nombre de lignes", stats["Nombre de lignes"])
+            st.metric("Nombre de colonnes", stats["Nombre de colonnes"])
+        
+        st.markdown("### Types de données")
+        st.json(stats["Types de données"])
+        
+        st.markdown("### Valeurs manquantes")
+        st.json(stats["Valeurs manquantes"])
+    
+    with tab3:
+        st.markdown("### Visualisations automatiques")
+        charts = auto_generate_charts(df)
+        
+        if not charts:
+            st.info("Pas assez de données numériques ou catégorielles pour générer des visualisations automatiques.")
+        
+        for chart_type, name, fig in charts:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with tab4:
+        st.markdown("### Exportation PowerBI")
+        st.info("Cette section permet de préparer vos données pour PowerBI.")
+        
+        template = generate_powerbi_template(df)
+        st.json(template)
+        
+        st.markdown(get_powerbi_download_link(template), unsafe_allow_html=True)
+        st.markdown("""
+        **Pour utiliser ce template dans PowerBI:**
+        1. Téléchargez le fichier JSON
+        2. Dans PowerBI Desktop, cliquez sur 'Obtenir les données'
+        3. Sélectionnez 'JSON' comme source
+        4. Importez le fichier téléchargé
+        5. Transformez les données selon vos besoins
+        """)
+
+def render_history_page():
+    st.markdown('<h2 class="section-header">Historique des importations</h2>', unsafe_allow_html=True)
+    
+    uploads_df = get_uploads()
+    
+    if uploads_df.empty:
+        st.info("Aucun historique d'importation disponible.")
+    else:
+        st.dataframe(uploads_df[['id', 'filename', 'upload_date', 'file_type']])
+        
+        # Permettre de recharger une importation précédente
+        selected_id = st.selectbox("Sélectionner une importation pour l'analyser", uploads_df['id'].tolist())
+        
+        if st.button("Recharger cette importation"):
+            selected_row = uploads_df[uploads_df['id'] == selected_id].iloc[0]
+            # Dans un vrai projet, vous chargeriez les données complètes depuis la base de données
+            # Ici on simule avec un dataframe vide pour l'exemple
+            st.session_state['data'] = pd.DataFrame(json.loads(selected_row['data_preview']))
+            st.session_state['filename'] = selected_row['filename']
+            st.session_state['page'] = "Analyser les données"
+            st.experimental_rerun()
+
 if __name__ == "__main__":
-    dashboard = main()
-    dashboard.run_dashboard()
+    # Initialiser la navigation par pages si ce n'est pas déjà fait
+    if 'page' in st.session_state:
+        page = st.session_state['page']
+        st.sidebar.radio("", ["Importer des données", "Analyser les données", "Historique d'importation"], 
+                        index=["Importer des données", "Analyser les données", "Historique d'importation"].index(page),
+                        key="page_radio")
+    main()
