@@ -1266,14 +1266,18 @@ def render_import_page():
             #with col1:
             #    st.metric("📊 Lignes", df.shape[0])
             with col1:
-                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True):
+                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True, key="analyze_now_1"):
                     st.session_state['page'] = "📈 Analyser"
                     st.rerun()
 
             with col2:
                 st.metric("📋 Colonnes", df.shape[1])
+
             with col3:
-                st.metric("💾 Taille mémoire", f"{df.memory_usage(deep=True).sum() / 1024:.1f} KB")
+                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True, key="analyze_now_2"):
+                    st.session_state['page'] = "📈 Analyser"
+                    st.rerun()
+
             
             # Prévisualisation avec pagination
             st.dataframe(
