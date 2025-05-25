@@ -1107,10 +1107,11 @@ class UIComponents:
         st.sidebar.markdown("- d’exporter vers PowerBI")
         st.sidebar.markdown("---")
         #st.sidebar.info("Développé avec par [Votre Nom]")
-        st.sidebar.info(f"Développé par {st.session_state.get('user_name', '...')}")
+        
         name = st.sidebar.text_input("Votre nom", value=st.session_state.get("user_name", ""))
         if name:
             st.session_state["user_name"] = name
+        st.sidebar.info(f"Développé par {st.session_state.get('user_name', '...')}")
 
     
     def display_file_info(self, uploaded_file):
