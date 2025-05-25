@@ -1309,7 +1309,7 @@ def render_import_page():
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True):
+                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True , key="analyze_now_btn_1"):
                     st.switch_page("pages/analyze.py") if hasattr(st, 'switch_page') else st.rerun()
             
             with col2:
@@ -1323,7 +1323,7 @@ def render_import_page():
                 )
             
             with col3:
-                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True):
+                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True , key="analyze_now_btn_2"):
                     st.session_state['page'] = "📈 Analyser"
                     st.rerun()
 
