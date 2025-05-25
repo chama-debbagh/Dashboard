@@ -1100,17 +1100,22 @@ class UIComponents:
 
     def render_sidebar(self):
         """Afficher des infos ou logos dans la sidebar si besoin"""
-        st.sidebar.markdown("## 🔧 Paramètres")
+        st.sidebar.markdown("## Paramètres")
         st.sidebar.markdown("Ce dashboard vous permet :")
         st.sidebar.markdown("- d’importer des fichiers de données")
         st.sidebar.markdown("- d’analyser rapidement les colonnes")
         st.sidebar.markdown("- d’exporter vers PowerBI")
         st.sidebar.markdown("---")
-        st.sidebar.info("Développé avec ❤️ par [Votre Nom]")
+        #st.sidebar.info("Développé avec par [Votre Nom]")
+        st.sidebar.info(f"Développé par {st.session_state.get('user_name', '...')}")
+        name = st.sidebar.text_input("Votre nom", value=st.session_state.get("user_name", ""))
+        if name:
+            st.session_state["user_name"] = name
+
     
     def display_file_info(self, uploaded_file):
         """Affiche les métadonnées du fichier importé"""
-        st.markdown("#### 📁 Informations sur le fichier")
+        st.markdown("#### Informations sur le fichier")
         file_details = {
             "Nom du fichier": uploaded_file.name,
             "Type MIME": uploaded_file.type,
@@ -1171,7 +1176,7 @@ class DatabaseManager:
             df = pd.read_sql_query("SELECT * FROM uploads ORDER BY upload_date DESC", self.conn)
             return df
         except Exception as e:
-            st.error(f"❌ Erreur lors de la lecture de la base de données : {e}")
+            st.error(f"Erreur lors de la lecture de la base de données : {e}")
             return pd.DataFrame()
 
 import streamlit as st
