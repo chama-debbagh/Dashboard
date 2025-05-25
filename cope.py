@@ -1,3 +1,4 @@
+"""
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -376,4 +377,263 @@ if __name__ == "__main__":
         st.sidebar.radio("", ["Importer des données", "Analyser les données", "Historique d'importation"], 
                         index=["Importer des données", "Analyser les données", "Historique d'importation"].index(page),
                         key="page_radio")
+    main()
+    """
+# Fichier complet cope.py (version améliorée)
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import plotly.express as px
+import plotly.graph_objects as go
+import io
+import base64
+import PyPDF2
+import json
+import sqlite3
+from datetime import datetime
+
+# Configuration de la page
+st.set_page_config(
+    page_title="Data Analytics Dashboard",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Styles CSS personnalisés
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1E88E5;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .section-header {
+        font-size: 1.5rem;
+        color: #1E88E5;
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+    }
+    .success-message {
+        background-color: #D4EDDA;
+        color: #155724;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+    }
+    .stButton button {
+        background-color: #1E88E5;
+        color: white;
+    }
+    .stButton button:hover {
+        background-color: #0D47A1;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# BDD SQLite
+
+def init_db():
+    conn = sqlite3.connect('dashboard_data.db')
+    c = conn.cursor()
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS uploads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT,
+        upload_date TEXT,
+        file_type TEXT,
+        data_preview TEXT
+    )''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# Extraction CSV robuste
+def extract_from_csv(file, encoding='utf-8'):
+    try:
+        content = file.read()
+        if len(content) == 0:
+            st.error("Le fichier est vide.")
+            return None
+        file.seek(0)
+        for sep in [',', ';', '\t']:
+            try:
+                df = pd.read_csv(io.StringIO(content.decode(encoding)), sep=sep)
+                if df.shape[1] > 1:
+                    return df
+            except:
+                continue
+        st.error("Impossible de déterminer le séparateur du fichier CSV.")
+        return None
+    except Exception as e:
+        st.error(f"Erreur lors de l'extraction du fichier CSV : {e}")
+        return None
+
+# Excel
+
+def extract_from_excel(file):
+    try:
+        return pd.read_excel(file)
+    except Exception as e:
+        st.error(f"Erreur fichier Excel: {e}")
+        return None
+
+# PDF
+
+def extract_from_pdf(file):
+    try:
+        pdf_reader = PyPDF2.PdfReader(file)
+        text = "".join(page.extract_text() for page in pdf_reader.pages)
+        return pd.DataFrame({'Texte': [text]})
+    except Exception as e:
+        st.error(f"Erreur PDF: {e}")
+        return None
+
+# Nettoyage et typage
+
+def clean_and_infer_types(df):
+    for col in df.columns:
+        try:
+            df[col] = pd.to_datetime(df[col])
+        except:
+            pass
+        try:
+            df[col] = pd.to_numeric(df[col])
+        except:
+            pass
+    return df
+
+# Sauvegarde historique
+
+def save_upload_to_db(filename, file_type, data_preview):
+    conn = sqlite3.connect('dashboard_data.db')
+    c = conn.cursor()
+    c.execute("INSERT INTO uploads (filename, upload_date, file_type, data_preview) VALUES (?, ?, ?, ?)",
+              (filename, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), file_type, data_preview))
+    conn.commit()
+    conn.close()
+
+def get_uploads():
+    conn = sqlite3.connect('dashboard_data.db')
+    df = pd.read_sql_query("SELECT * FROM uploads ORDER BY upload_date DESC", conn)
+    conn.close()
+    return df
+
+# Analyse
+
+def generate_basic_stats(df):
+    return {
+        "Nombre de lignes": df.shape[0],
+        "Nombre de colonnes": df.shape[1],
+        "Types de données": df.dtypes.astype(str).to_dict(),
+        "Valeurs manquantes": df.isna().sum().to_dict()
+    }
+
+def auto_generate_charts(df):
+    charts = []
+    num_cols = df.select_dtypes(include=['number']).columns
+    cat_cols = df.select_dtypes(include=['object', 'category']).columns
+
+    for col in num_cols:
+        fig = px.histogram(df, x=col, title=f"Distribution de {col}")
+        charts.append(fig)
+
+    if len(num_cols) >= 2:
+        x = st.selectbox("Axe X", num_cols)
+        y = st.selectbox("Axe Y", num_cols, index=1)
+        fig = px.scatter(df, x=x, y=y, title=f"Scatter {x} vs {y}")
+        charts.append(fig)
+
+    for col in cat_cols:
+        if df[col].nunique() <= 15:
+            counts = df[col].value_counts().head(10)
+            fig = px.bar(x=counts.index, y=counts.values, title=f"Top valeurs pour {col}")
+            charts.append(fig)
+
+    return charts
+
+# Export
+
+def get_csv_download_link(df):
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()
+    return f'<a href="data:file/csv;base64,{b64}" download="data_export.csv">Télécharger les données</a>'
+
+# Pages
+
+def main():
+    st.markdown('<h1 class="main-header">Dashboard Analytics</h1>', unsafe_allow_html=True)
+    st.sidebar.image("https://via.placeholder.com/150x150.png?text=DA", width=150)
+    page = st.sidebar.radio("Menu", ["Importer", "Analyser", "Historique"])
+
+    if page == "Importer":
+        render_import_page()
+    elif page == "Analyser":
+        render_analysis_page()
+    elif page == "Historique":
+        render_history_page()
+
+def render_import_page():
+    st.header("Importer vos données")
+    uploaded_file = st.file_uploader("Choisissez un fichier", type=["csv", "xlsx", "xls", "pdf"])
+
+    if uploaded_file:
+        file_ext = uploaded_file.name.split('.')[-1]
+        df = None
+        with st.spinner("Chargement..."):
+            if file_ext in ['xlsx', 'xls']:
+                df = extract_from_excel(uploaded_file)
+            elif file_ext == 'csv':
+                df = extract_from_csv(uploaded_file)
+            elif file_ext == 'pdf':
+                df = extract_from_pdf(uploaded_file)
+
+        if df is not None:
+            df = clean_and_infer_types(df)
+            st.session_state['data'] = df
+            st.success("Fichier importé avec succès")
+            st.dataframe(df.head())
+            save_upload_to_db(uploaded_file.name, file_ext, df.head().to_json())
+
+def render_analysis_page():
+    st.header("Analyse des données")
+    if 'data' not in st.session_state:
+        st.warning("Aucune donnée importée.")
+        return
+
+    df = st.session_state['data']
+
+    st.subheader("Filtres dynamiques")
+    with st.expander("Afficher les filtres"):
+        for col in df.columns:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                st.slider(col, float(df[col].min()), float(df[col].max()), (float(df[col].min()), float(df[col].max())))
+            elif pd.api.types.is_datetime64_any_dtype(df[col]):
+                st.date_input(col, [df[col].min(), df[col].max()])
+            elif df[col].nunique() < 30:
+                st.multiselect(col, df[col].unique(), default=list(df[col].unique()))
+
+    st.subheader("Statistiques de base")
+    stats = generate_basic_stats(df)
+    st.json(stats)
+
+    st.subheader("Visualisations")
+    charts = auto_generate_charts(df)
+    for fig in charts:
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown(get_csv_download_link(df), unsafe_allow_html=True)
+
+def render_history_page():
+    st.header("Historique des importations")
+    uploads_df = get_uploads()
+    if uploads_df.empty:
+        st.info("Aucun historique disponible.")
+    else:
+        st.dataframe(uploads_df[['id', 'filename', 'upload_date', 'file_type']])
+
+if __name__ == '__main__':
     main()
