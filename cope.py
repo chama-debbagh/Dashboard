@@ -1216,8 +1216,18 @@ def main():
     
     # Barre latérale
     ui_components.render_sidebar()
-    page = st.sidebar.radio("Navigation", ["🔄 Importer", "📈 Analyser", "📚 Historique", "⚙️ PowerBI"], label_visibility="collapsed")
-    
+    #page = st.sidebar.radio("Navigation", ["🔄 Importer", "📈 Analyser", "📚 Historique", "⚙️ PowerBI"], label_visibility="collapsed")
+    if 'page' not in st.session_state:
+        st.session_state['page'] = "🔄 Importer"
+
+    page = st.sidebar.radio(
+        "Navigation",
+        ["🔄 Importer", "📈 Analyser", "📚 Historique", "⚙️ PowerBI"],
+        index=["🔄 Importer", "📈 Analyser", "📚 Historique", "⚙️ PowerBI"].index(st.session_state['page'])
+    )
+    st.session_state['page'] = page
+
+
     # Navigation entre les pages
     if page == "🔄 Importer":
         render_import_page()
@@ -1298,8 +1308,10 @@ def render_import_page():
                 )
             
             with col3:
-                if st.button("🔄 PowerBI Export", use_container_width=True):
-                    st.switch_page("pages/powerbi.py") if hasattr(st, 'switch_page') else st.rerun()
+                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True):
+                    st.session_state['page'] = "📈 Analyser"
+                    st.rerun()
+
 
 def render_analysis_page():
     st.markdown('<h2 class="section-header">📈 Analyse des données</h2>', unsafe_allow_html=True)
