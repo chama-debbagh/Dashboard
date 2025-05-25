@@ -1406,7 +1406,9 @@ def render_analysis_page():
                     col1, col2 = st.columns(2)
                 
                 with col1 if i % 2 == 0 else col2:
-                    st.plotly_chart(fig, use_container_width=True)
+                    #st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key=f"{chart_type}_{i}")
+
     
     with tab4:
         st.markdown("### 🔍 Qualité des données")
