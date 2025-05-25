@@ -1261,20 +1261,24 @@ def render_import_page():
             
             # Aperçu des données
             st.markdown('<h3 class="section-header">👀 Aperçu des données</h3>', unsafe_allow_html=True)
-            
             col1, col2, col3 = st.columns(3)
-            #with col1:
-            #    st.metric("📊 Lignes", df.shape[0])
+
             with col1:
-                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True, key="analyze_now_1"):
-                    st.session_state['page'] = "📈 Analyser"
-                    st.rerun()
+                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True, key="analyze_btn_1"):
+                    st.switch_page("pages/analyze.py") if hasattr(st, 'switch_page') else st.rerun()
 
             with col2:
-                st.metric("📋 Colonnes", df.shape[1])
+                csv_data = df.to_csv(index=False)
+                st.download_button(
+                    "💾 Télécharger CSV",
+                    csv_data,
+                    file_name=f"cleaned_{uploaded_file.name}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
 
             with col3:
-                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True, key="analyze_now_2"):
+                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True, key="analyze_btn_2"):
                     st.session_state['page'] = "📈 Analyser"
                     st.rerun()
 
