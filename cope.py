@@ -1274,8 +1274,10 @@ def render_import_page():
                     csv_data,
                     file_name=f"cleaned_{uploaded_file.name}.csv",
                     mime="text/csv",
-                    use_container_width=True
+                    use_container_width=True,
+                    key="download_csv_main"
                 )
+
 
             with col3:
                 if st.button("📈 Analyser maintenant", type="primary", use_container_width=True, key="analyze_btn_2"):
@@ -1542,7 +1544,8 @@ def render_powerbi_page():
                 "📊 Télécharger Excel",
                 exports['excel'],
                 file_name=f"{filename}_powerbi.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_excel_pbi"
             )
         
         with col2:
@@ -1550,7 +1553,8 @@ def render_powerbi_page():
                 "📋 Télécharger CSV",
                 exports['csv'],
                 file_name=f"{filename}_powerbi.csv",
-                mime="text/csv"
+                mime="text/csv",
+                key="download_csv_pbi"
             )
         
         with col3:
@@ -1558,7 +1562,8 @@ def render_powerbi_page():
                 "⚙️ Template PowerBI",
                 exports['template'],
                 file_name=f"{filename}_template.json",
-                mime="application/json"
+                mime="application/json",
+                key="download_template_pbi"
             )
         
         # Instructions PowerBI
