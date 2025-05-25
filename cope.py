@@ -1263,8 +1263,13 @@ def render_import_page():
             st.markdown('<h3 class="section-header">👀 Aperçu des données</h3>', unsafe_allow_html=True)
             
             col1, col2, col3 = st.columns(3)
+            #with col1:
+            #    st.metric("📊 Lignes", df.shape[0])
             with col1:
-                st.metric("📊 Lignes", df.shape[0])
+                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True):
+                    st.session_state['page'] = "📈 Analyser"
+                    st.rerun()
+
             with col2:
                 st.metric("📋 Colonnes", df.shape[1])
             with col3:
