@@ -1182,12 +1182,12 @@ import sys
 # Ajouter le dossier utils au path
 sys.path.append(str(Path(__file__).parent / "utils"))
 
-from data_extractor import DataExtractor
-from data_analyzer import DataAnalyzer
-from visualizer import DataVisualizer
-from powerbi_exporter import PowerBIExporter
-from database_manager import DatabaseManager
-from ui_components import UIComponents
+#from data_extractor import DataExtractor
+#from data_analyzer import DataAnalyzer
+#from visualizer import DataVisualizer
+#from powerbi_exporter import PowerBIExporter
+#from database_manager import DatabaseManager
+#from ui_components import UIComponents
 
 # Configuration de la page
 st.set_page_config(
