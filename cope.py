@@ -22,6 +22,7 @@ st.set_page_config(
 
 # Styles CSS pour améliorer l'apparence
 st.markdown("""
+"""
 <style>
     .main-header {
         font-size: 2.5rem;
@@ -50,6 +51,7 @@ st.markdown("""
         background-color: #0D47A1;
     }
 </style>
+"""
 """, unsafe_allow_html=True)
 
 # Base de données SQLite
@@ -340,12 +342,12 @@ def render_analysis_page():
         
         st.markdown(get_powerbi_download_link(template), unsafe_allow_html=True)
         st.markdown("""
-        **Pour utiliser ce template dans PowerBI:**
-        1. Téléchargez le fichier JSON
-        2. Dans PowerBI Desktop, cliquez sur 'Obtenir les données'
-        3. Sélectionnez 'JSON' comme source
-        4. Importez le fichier téléchargé
-        5. Transformez les données selon vos besoins
+       # **Pour utiliser ce template dans PowerBI:**
+      #  1. Téléchargez le fichier JSON
+       # 2. Dans PowerBI Desktop, cliquez sur 'Obtenir les données'
+       # 3. Sélectionnez 'JSON' comme source
+      #  4. Importez le fichier téléchargé
+       # 5. Transformez les données selon vos besoins
         """)
 
 def render_history_page():
