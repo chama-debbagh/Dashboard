@@ -7,6 +7,8 @@ import plotly.graph_objects as go
 import json
 import io
 import sqlite3
+import zipfile
+import base64
 from datetime import datetime
 from typing import Optional, List, Tuple, Any, Dict
 from pathlib import Path
@@ -14,7 +16,6 @@ from io import StringIO
 import sys
 import chardet
 import openpyxl
-
 
 class DataExtractor:
     """Classe pour extraire les données de différents formats de fichiers"""
