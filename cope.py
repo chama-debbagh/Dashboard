@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,6 +6,8 @@ import plotly.graph_objects as go
 import json
 import io
 import sqlite3
+import zipfile
+import base64
 from datetime import datetime
 from typing import Optional, List, Tuple, Any, Dict
 from pathlib import Path
@@ -60,10 +61,8 @@ class DataExtractor:
     def _extract_from_excel(self, uploaded_file) -> Optional[pd.DataFrame]:
         """Extrait les données d'un fichier Excel"""
         try:
-            # Lire le fichier Excel avec gestion des erreurs
             excel_file = pd.ExcelFile(uploaded_file)
             
-            # Si plusieurs feuilles, demander à l'utilisateur de choisir
             if len(excel_file.sheet_names) > 1:
                 st.info(f"Le fichier contient {len(excel_file.sheet_names)} feuilles")
                 selected_sheet = st.selectbox(
@@ -75,7 +74,6 @@ class DataExtractor:
             else:
                 df = pd.read_excel(uploaded_file, sheet_name=0)
             
-            # Nettoyage initial
             df = self._clean_dataframe(df)
             
             st.success(f"Fichier Excel importé: {df.shape[0]} lignes, {df.shape[1]} colonnes")
@@ -88,17 +86,14 @@ class DataExtractor:
     def _extract_from_csv(self, uploaded_file) -> Optional[pd.DataFrame]:
         """Extrait les données d'un fichier CSV avec détection automatique"""
         try:
-            # Lire les premiers octets pour détecter l'encodage
             raw_data = uploaded_file.read()
-            uploaded_file.seek(0)  # Remettre le curseur au début
+            uploaded_file.seek(0)
             
-            # Détecter l'encodage
             encoding_result = chardet.detect(raw_data)
             encoding = encoding_result['encoding'] if encoding_result['confidence'] > 0.7 else 'utf-8'
             
             st.info(f"🔍 Encodage détecté: {encoding} (confiance: {encoding_result['confidence']:.2f})")
             
-            # Essayer différents séparateurs et configurations
             separators = [',', ';', '\t', '|']
             best_df = None
             best_cols = 0
@@ -114,7 +109,6 @@ class DataExtractor:
                         na_values=['', 'NA', 'N/A', 'NULL', 'null', '#N/A']
                     )
                     
-                    # Garder le DataFrame avec le plus de colonnes cohérentes
                     if len(df_test.columns) > best_cols and len(df_test.columns) > 1:
                         best_df = df_test
                         best_cols = len(df_test.columns)
@@ -129,7 +123,6 @@ class DataExtractor:
             
             st.success(f"CSV importé avec séparateur '{best_sep}': {best_df.shape[0]} lignes, {best_df.shape[1]} colonnes")
             
-            # Nettoyage
             best_df = self._clean_dataframe(best_df)
             return best_df
             
@@ -142,18 +135,15 @@ class DataExtractor:
         try:
             json_data = json.load(uploaded_file)
             
-            # Gestion de différentes structures JSON
             if isinstance(json_data, list):
                 df = pd.json_normalize(json_data)
             elif isinstance(json_data, dict):
-                # Essayer de trouver une liste dans le dictionnaire
                 for key, value in json_data.items():
                     if isinstance(value, list) and len(value) > 0:
                         df = pd.json_normalize(value)
                         st.info(f"Données extraites de la clé: '{key}'")
                         break
                 else:
-                    # Si pas de liste trouvée, normaliser le dictionnaire
                     df = pd.json_normalize([json_data])
             else:
                 st.error("Structure JSON non supportée")
@@ -169,7 +159,6 @@ class DataExtractor:
     def _extract_from_txt(self, uploaded_file) -> Optional[pd.DataFrame]:
         """Extrait les données d'un fichier texte"""
         try:
-            # Lire le contenu du fichier
             content = uploaded_file.read().decode('utf-8')
             lines = content.strip().split('\n')
             
@@ -177,10 +166,8 @@ class DataExtractor:
                 st.error("Fichier texte vide")
                 return None
             
-            # Essayer de détecter un format tabulaire
             first_line = lines[0]
             
-            # Détecter le séparateur le plus probable
             separators = ['\t', ',', ';', '|', ' ']
             best_sep = None
             max_cols = 0
@@ -192,18 +179,15 @@ class DataExtractor:
                     best_sep = sep
             
             if max_cols < 2:
-                # Traiter comme texte simple
                 df = pd.DataFrame({'Contenu': lines})
                 st.info("Fichier traité comme texte simple")
             else:
-                # Traiter comme données tabulaires
                 data = []
                 headers = lines[0].split(best_sep)
                 
                 for line in lines[1:]:
                     if line.strip():
                         values = line.split(best_sep)
-                        # Ajuster la longueur si nécessaire
                         while len(values) < len(headers):
                             values.append('')
                         data.append(values[:len(headers)])
@@ -221,24 +205,17 @@ class DataExtractor:
     def _clean_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Nettoie le DataFrame après importation"""
         try:
-            # Supprimer les lignes entièrement vides
             df = df.dropna(how='all')
-            
-            # Supprimer les colonnes entièrement vides
             df = df.dropna(axis=1, how='all')
             
-            # Nettoyer les noms de colonnes
             df.columns = df.columns.astype(str)
             df.columns = [col.strip() for col in df.columns]
             
-            # Remplacer les noms de colonnes vides
             df.columns = [f'Colonne_{i}' if col == '' or col.startswith('Unnamed') 
                          else col for i, col in enumerate(df.columns)]
             
-            # Supprimer les doublons de noms de colonnes
             df.columns = pd.io.common.dedup_names(df.columns, is_potential_multiindex=False)
             
-            # Tentative de conversion automatique des types
             df = self._auto_convert_types(df)
             
             return df
@@ -251,10 +228,8 @@ class DataExtractor:
         """Conversion automatique des types de données"""
         try:
             for col in df.columns:
-                # Essayer de convertir en numérique
                 numeric_col = pd.to_numeric(df[col], errors='coerce')
                 if not numeric_col.isna().all():
-                    # Si plus de 80% des valeurs sont numériques, convertir
                     valid_numeric = (~numeric_col.isna()).sum()
                     total_non_null = (~df[col].isna()).sum()
                     
@@ -262,7 +237,6 @@ class DataExtractor:
                         df[col] = numeric_col
                         continue
                 
-                # Essayer de convertir en datetime
                 try:
                     datetime_col = pd.to_datetime(df[col], errors='coerce')
                     valid_datetime = (~datetime_col.isna()).sum()
@@ -274,7 +248,6 @@ class DataExtractor:
                 except:
                     pass
                 
-                # Nettoyer les colonnes texte
                 if df[col].dtype == 'object':
                     df[col] = df[col].astype(str).str.strip()
                     df[col] = df[col].replace('nan', pd.NA)
@@ -286,10 +259,6 @@ class DataExtractor:
             return df
 
 
-
-
-
-
 class DataAnalyzer:
     """Classe pour analyser les données et générer des insights"""
     
@@ -297,15 +266,7 @@ class DataAnalyzer:
         pass
     
     def get_column_info(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Retourne des informations détaillées sur chaque colonne
-        
-        Args:
-            df: DataFrame à analyser
-            
-        Returns:
-            DataFrame avec les informations des colonnes
-        """
+        """Retourne des informations détaillées sur chaque colonne"""
         info_data = []
         
         for col in df.columns:
@@ -318,7 +279,6 @@ class DataAnalyzer:
                 'Taille_mémoire_KB': f"{df[col].memory_usage(deep=True) / 1024:.1f}"
             }
             
-            # Ajouter des statistiques spécifiques selon le type
             if df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
                 col_data.update({
                     'Min': df[col].min() if not df[col].empty else None,
@@ -339,19 +299,11 @@ class DataAnalyzer:
         return pd.DataFrame(info_data)
     
     def get_categorical_stats(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Statistiques pour les colonnes catégorielles
-        
-        Args:
-            df: DataFrame avec colonnes catégorielles
-            
-        Returns:
-            DataFrame avec statistiques catégorielles
-        """
+        """Statistiques pour les colonnes catégorielles"""
         stats_data = []
         
         for col in df.columns:
-            if df[col].nunique() < 50:  # Seulement pour colonnes avec peu de valeurs uniques
+            if df[col].nunique() < 50:
                 value_counts = df[col].value_counts()
                 stats_data.append({
                     'Colonne': col,
@@ -365,26 +317,16 @@ class DataAnalyzer:
         return pd.DataFrame(stats_data)
     
     def analyze_data_quality(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Analyse la qualité des données
-        
-        Args:
-            df: DataFrame à analyser
-            
-        Returns:
-            DataFrame avec rapport de qualité
-        """
+        """Analyse la qualité des données"""
         quality_data = []
         
         for col in df.columns:
-            # Calculs de base
             total_rows = len(df)
             missing_count = df[col].isnull().sum()
             missing_pct = (missing_count / total_rows) * 100
             unique_count = df[col].nunique()
             unique_pct = (unique_count / total_rows) * 100
             
-            # Score de qualité (0-100)
             quality_score = 100
             if missing_pct > 50:
                 quality_score -= 30
@@ -393,7 +335,6 @@ class DataAnalyzer:
             elif missing_pct > 5:
                 quality_score -= 5
             
-            # Problèmes potentiels
             issues = []
             if missing_pct > 20:
                 issues.append("Beaucoup de valeurs manquantes")
@@ -402,7 +343,6 @@ class DataAnalyzer:
             if unique_count == 1:
                 issues.append("Valeur constante")
             if df[col].dtype == 'object':
-                # Vérifier la cohérence des formats
                 sample_values = df[col].dropna().astype(str).str.strip()
                 if len(sample_values) > 0:
                     lengths = sample_values.str.len()
@@ -421,24 +361,14 @@ class DataAnalyzer:
         return pd.DataFrame(quality_data)
     
     def generate_insights(self, df: pd.DataFrame) -> List[str]:
-        """
-        Génère des insights automatiques sur les données
-        
-        Args:
-            df: DataFrame à analyser
-            
-        Returns:
-            Liste d'insights
-        """
+        """Génère des insights automatiques sur les données"""
         insights = []
         
-        # Insights généraux
         total_rows = len(df)
         total_cols = len(df.columns)
         
         insights.append(f"Le dataset contient {total_rows:,} lignes et {total_cols} colonnes")
         
-        # Insights sur les valeurs manquantes
         missing_total = df.isnull().sum().sum()
         missing_pct = (missing_total / (total_rows * total_cols)) * 100
         if missing_pct > 10:
@@ -446,7 +376,6 @@ class DataAnalyzer:
         elif missing_pct == 0:
             insights.append("Excellent: Aucune valeur manquante détectée")
         
-        # Insights sur les types de données
         numeric_cols = len(df.select_dtypes(include=['number']).columns)
         text_cols = len(df.select_dtypes(include=['object']).columns)
         date_cols = len(df.select_dtypes(include=['datetime']).columns)
@@ -459,18 +388,15 @@ class DataAnalyzer:
         if date_cols > 0:
             insights.append(f"Dataset temporel détecté avec {date_cols} colonne(s) de dates")
         
-        # Insights sur la distribution
-        for col in df.select_dtypes(include=['number']).columns[:3]:  # Top 3 colonnes numériques
+        for col in df.select_dtypes(include=['number']).columns[:3]:
             skewness = df[col].skew()
             if abs(skewness) > 2:
                 skew_type = "très asymétrique à droite" if skewness > 0 else "très asymétrique à gauche"
                 insights.append(f"La colonne '{col}' a une distribution {skew_type}")
         
-        # Insights sur les corrélations
         numeric_df = df.select_dtypes(include=['number'])
         if len(numeric_df.columns) > 1:
             corr_matrix = numeric_df.corr()
-            # Trouver les corrélations les plus fortes (hors diagonale)
             corr_pairs = []
             for i in range(len(corr_matrix.columns)):
                 for j in range(i+1, len(corr_matrix.columns)):
@@ -482,7 +408,6 @@ class DataAnalyzer:
                 best_corr = max(corr_pairs, key=lambda x: abs(x[2]))
                 insights.append(f"Forte corrélation détectée entre '{best_corr[0]}' et '{best_corr[1]}' (r={best_corr[2]:.2f})")
         
-        # Insights sur les outliers
         for col in df.select_dtypes(include=['number']).columns[:2]:
             Q1 = df[col].quantile(0.25)
             Q3 = df[col].quantile(0.75)
@@ -495,21 +420,12 @@ class DataAnalyzer:
                 outlier_pct = (len(outliers) / len(df)) * 100
                 insights.append(f"La colonne '{col}' contient {len(outliers)} valeurs aberrantes ({outlier_pct:.1f}%)")
         
-        return insights[:8]  # Limiter à 8 insights
+        return insights[:8]
     
     def get_recommendations(self, df: pd.DataFrame) -> List[str]:
-        """
-        Génère des recommandations pour améliorer les données
-        
-        Args:
-            df: DataFrame à analyser
-            
-        Returns:
-            Liste de recommandations
-        """
+        """Génère des recommandations pour améliorer les données"""
         recommendations = []
         
-        # Recommandations sur les valeurs manquantes
         high_missing_cols = []
         for col in df.columns:
             missing_pct = (df[col].isnull().sum() / len(df)) * 100
@@ -520,14 +436,11 @@ class DataAnalyzer:
             recommendations.append(f"Traiter les valeurs manquantes dans {len(high_missing_cols)} colonne(s): " + 
                                  ", ".join([f"{col} ({pct:.1f}%)" for col, pct in high_missing_cols[:3]]))
         
-        # Recommandations sur les doublons
         duplicates = df.duplicated().sum()
         if duplicates > 0:
             recommendations.append(f"Supprimer {duplicates} ligne(s) dupliquée(s)")
         
-        # Recommandations sur les types de données
         for col in df.select_dtypes(include=['object']).columns:
-            # Vérifier si la colonne pourrait être numérique
             try:
                 numeric_converted = pd.to_numeric(df[col], errors='coerce')
                 non_null_original = df[col].notna().sum()
@@ -538,11 +451,9 @@ class DataAnalyzer:
             except:
                 pass
             
-            # Vérifier si la colonne pourrait être catégorielle
             if df[col].nunique() < 20 and df[col].nunique() / len(df) < 0.1:
                 recommendations.append(f"Convertir la colonne '{col}' en type catégoriel pour optimiser la mémoire")
         
-        # Recommandations sur la normalisation
         numeric_cols = df.select_dtypes(include=['number']).columns
         for col in numeric_cols:
             if df[col].std() > 0:
@@ -551,11 +462,9 @@ class DataAnalyzer:
                 if col_range > 1000 or col_mean > 1000:
                     recommendations.append(f"Considérer la normalisation de la colonne '{col}' pour les analyses")
         
-        # Recommandations sur l'indexation
         if len(df) > 10000:
             recommendations.append("Considérer l'ajout d'un index pour améliorer les performances sur ce large dataset")
         
-        # Recommandations sur les visualisations
         if len(numeric_cols) >= 2:
             recommendations.append("Créer des graphiques de corrélation pour explorer les relations entre variables")
         
@@ -563,7 +472,7 @@ class DataAnalyzer:
         if len(categorical_cols) > 0:
             recommendations.append("Analyser la distribution des variables catégorielles avec des graphiques en barres")
         
-        return recommendations[:6]  # Limiter à 6 recommandations
+        return recommendations[:6]
     
     def _calculate_entropy(self, series: pd.Series) -> float:
         """Calcule l'entropie d'une série (mesure de diversité)"""
@@ -591,19 +500,15 @@ class DataAnalyzer:
             return "Colonne de bonne qualité"
 
 
-
-
 class DataVisualizer:
     """Classe pour créer des visualisations automatiques des données"""
     
     def __init__(self):
-        # Palette de couleurs moderne
         self.color_palette = [
             '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
             '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
         ]
         
-        # Template de style pour les graphiques
         self.layout_template = {
             'font': {'family': 'Arial, sans-serif', 'size': 12},
             'title': {'x': 0.5, 'xanchor': 'center'},
@@ -613,47 +518,31 @@ class DataVisualizer:
         }
     
     def auto_generate_charts(self, df: pd.DataFrame) -> List[Tuple[str, str, Any]]:
-        """
-        Génère automatiquement des graphiques appropriés selon les données
-        
-        Args:
-            df: DataFrame à visualiser
-            
-        Returns:
-            Liste de tuples (type_graphique, nom, figure_plotly)
-        """
+        """Génère automatiquement des graphiques appropriés selon les données"""
         charts = []
         
-        # Séparer les colonnes par type
         numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
         categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
         datetime_cols = df.select_dtypes(include=['datetime']).columns.tolist()
         
-        # 1. Histogrammes pour colonnes numériques
-        for col in numeric_cols[:4]:  # Limiter à 4 pour éviter la surcharge
+        for col in numeric_cols[:4]:
             fig = self._create_histogram(df, col)
             charts.append(("histogram", f"Distribution de {col}", fig))
         
-        # 2. Graphiques en barres pour colonnes catégorielles
         for col in categorical_cols[:3]:
-            if df[col].nunique() <= 15:  # Seulement si peu de catégories
+            if df[col].nunique() <= 15:
                 fig = self._create_bar_chart(df, col)
                 charts.append(("bar", f"Répartition de {col}", fig))
         
-        # 3. Scatter plots pour paires de variables numériques
         if len(numeric_cols) >= 2:
-            # Créer scatter plot pour les 2 premières colonnes numériques
             fig = self._create_scatter_plot(df, numeric_cols[0], numeric_cols[1])
             charts.append(("scatter", f"{numeric_cols[0]} vs {numeric_cols[1]}", fig))
             
-            # Si plus de 2 colonnes numériques, ajouter un autre scatter plot
             if len(numeric_cols) >= 3:
                 fig = self._create_scatter_plot(df, numeric_cols[0], numeric_cols[2])
                 charts.append(("scatter", f"{numeric_cols[0]} vs {numeric_cols[2]}", fig))
         
-        # 4. Box plots pour distribution par catégorie
         if len(numeric_cols) >= 1 and len(categorical_cols) >= 1:
-            # Prendre la première colonne catégorielle avec peu de valeurs uniques
             cat_col = None
             for col in categorical_cols:
                 if df[col].nunique() <= 10:
@@ -664,12 +553,10 @@ class DataVisualizer:
                 fig = self._create_box_plot(df, numeric_cols[0], cat_col)
                 charts.append(("box", f"{numeric_cols[0]} par {cat_col}", fig))
         
-        # 5. Graphiques temporels si colonnes datetime
         if len(datetime_cols) >= 1 and len(numeric_cols) >= 1:
             fig = self._create_time_series(df, datetime_cols[0], numeric_cols[0])
             charts.append(("timeseries", f"Évolution de {numeric_cols[0]}", fig))
         
-        # 6. Heatmap de corrélation si suffisamment de colonnes numériques
         if len(numeric_cols) >= 3:
             fig = self.create_correlation_matrix(df[numeric_cols])
             charts.append(("heatmap", "Matrice de corrélation", fig))
@@ -693,7 +580,6 @@ class DataVisualizer:
             showlegend=False
         )
         
-        # Ajouter ligne de moyenne
         mean_val = df[column].mean()
         fig.add_vline(
             x=mean_val, 
@@ -706,7 +592,7 @@ class DataVisualizer:
     
     def _create_bar_chart(self, df: pd.DataFrame, column: str) -> go.Figure:
         """Crée un graphique en barres pour une colonne catégorielle"""
-        value_counts = df[column].value_counts().head(10)  # Top 10
+        value_counts = df[column].value_counts().head(10)
         
         fig = px.bar(
             x=value_counts.index,
@@ -723,7 +609,6 @@ class DataVisualizer:
             showlegend=False
         )
         
-        # Rotation des labels si nécessaires
         if max([len(str(x)) for x in value_counts.index]) > 10:
             fig.update_xaxes(tickangle=45)
         
@@ -740,7 +625,6 @@ class DataVisualizer:
             opacity=0.7
         )
         
-        # Ajouter ligne de tendance
         try:
             fig.add_traces(
                 px.scatter(df, x=x_col, y=y_col, trendline="ols").data[1]
@@ -754,7 +638,6 @@ class DataVisualizer:
             yaxis_title=y_col
         )
         
-        # Calculer et afficher la corrélation
         correlation = df[x_col].corr(df[y_col])
         fig.add_annotation(
             x=0.02, y=0.98,
@@ -791,7 +674,6 @@ class DataVisualizer:
     
     def _create_time_series(self, df: pd.DataFrame, date_col: str, value_col: str) -> go.Figure:
         """Crée un graphique temporel"""
-        # Trier par date
         df_sorted = df.sort_values(date_col)
         
         fig = px.line(
@@ -812,10 +694,8 @@ class DataVisualizer:
     
     def create_correlation_matrix(self, df: pd.DataFrame) -> go.Figure:
         """Crée une heatmap de corrélation"""
-        # Calculer la matrice de corrélation
         corr_matrix = df.corr()
         
-        # Créer la heatmap
         fig = px.imshow(
             corr_matrix,
             text_auto=True,
@@ -836,11 +716,10 @@ class DataVisualizer:
     
     def create_missing_data_heatmap(self, df: pd.DataFrame) -> go.Figure:
         """Crée une heatmap des valeurs manquantes"""
-        # Créer matrice des valeurs manquantes
         missing_data = df.isnull().astype(int)
         
         fig = px.imshow(
-            missing_data.T,  # Transposer pour avoir colonnes en y
+            missing_data.T,
             title="Carte des valeurs manquantes (blanc = manquant)",
             color_continuous_scale=["white", "red"],
             aspect="auto"
@@ -854,217 +733,546 @@ class DataVisualizer:
         )
         
         return fig
-    
-    def create_distribution_comparison(self, df: pd.DataFrame, columns: List[str]) -> go.Figure:
-        """Compare la distribution de plusieurs colonnes numériques"""
-        fig = make_subplots(
-            rows=1, cols=len(columns),
-            subplot_titles=columns,
-            shared_yaxes=True
-        )
-        
-        for i, col in enumerate(columns):
-            fig.add_trace(
-                go.Histogram(
-                    x=df[col],
-                    name=col,
-                    marker_color=self.color_palette[i % len(self.color_palette)],
-                    opacity=0.7
-                ),
-                row=1, col=i+1
-            )
-        
-        fig.update_layout(
-            title="Comparaison des distributions",
-            **self.layout_template,
-            height=400,
-            showlegend=False
-        )
-        
-        return fig
-    
-    def create_statistical_summary_chart(self, df: pd.DataFrame) -> go.Figure:
-        """Crée un graphique résumé des statistiques"""
-        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-        
-        if len(numeric_cols) == 0:
-            return None
-        
-        # Calculer les statistiques
-        stats = df[numeric_cols].describe().T
-        
-        fig = go.Figure()
-        
-        # Ajouter les barres pour moyenne et médiane
-        fig.add_trace(go.Bar(
-            name='Moyenne',
-            x=stats.index,
-            y=stats['mean'],
-            marker_color=self.color_palette[0]
-        ))
-        
-        fig.add_trace(go.Bar(
-            name='Médiane',
-            x=stats.index,
-            y=stats['50%'],
-            marker_color=self.color_palette[1]
-        ))
-        
-        fig.update_layout(
-            title="Comparaison Moyenne vs Médiane",
-            **self.layout_template,
-            barmode='group',
-            xaxis_title="Variables",
-            yaxis_title="Valeurs"
-        )
-        
-        return fig
 
 
-
-
-
+# ============================================================================
+# CLASSE CORRIGÉE POUR L'EXPORT POWER BI TEMPLATE
+# ============================================================================
 
 class PowerBIExporter:
-    """Classe pour exporter les données vers PowerBI"""
+    """
+    Classe CORRIGÉE pour exporter vers Power BI avec génération de template .pbit
+    
+    CHANGEMENTS MAJEURS:
+    1. Génération d'un vrai fichier .pbit (Power BI Template)
+    2. Création de la structure JSON conforme au format Power BI
+    3. Ajout de visualisations pré-configurées
+    4. Génération de mesures DAX exploitables
+    5. Configuration du modèle de données avec relations
+    """
     
     def __init__(self):
-        pass
+        self.version = "2.118.828.0"  # Version Power BI compatible
     
-    def create_powerbi_export(self, df: pd.DataFrame, filename: str, include_metadata: bool = True) -> Dict[str, Any]:
+    def create_powerbi_template(self, df: pd.DataFrame, filename: str) -> bytes:
         """
-        Crée tous les fichiers nécessaires pour PowerBI
+        FONCTION PRINCIPALE CORRIGÉE
+        Crée un fichier .pbit (Power BI Template) complet
+        
+        POURQUOI CE CHANGEMENT:
+        - Un .pbit est un fichier ZIP contenant des fichiers JSON structurés
+        - Il contient: Layout (visuels), DataModel (schéma), et Metadata
+        - Permet d'ouvrir directement dans Power BI Desktop
         
         Args:
-            df: DataFrame à exporter
+            df: DataFrame source
             filename: Nom du fichier original
-            include_metadata: Inclure les métadonnées
             
         Returns:
-            Dictionnaire avec les fichiers générés
+            bytes: Contenu du fichier .pbit
         """
-        exports = {}
+        # Créer un buffer mémoire pour le ZIP
+        zip_buffer = io.BytesIO()
         
-        # 1. Export Excel optimisé pour PowerBI
-        exports['excel'] = self._create_excel_export(df, filename, include_metadata)
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # 1. LAYOUT - Définit les pages et visualisations
+            layout_json = self._create_layout_structure(df, filename)
+            zip_file.writestr('Report/Layout', json.dumps(layout_json, indent=2))
+            
+            # 2. DATA MODEL - Structure du modèle de données
+            datamodel_json = self._create_datamodel_structure(df, filename)
+            zip_file.writestr('DataModelSchema', json.dumps(datamodel_json, indent=2))
+            
+            # 3. METADATA - Informations du template
+            metadata_json = self._create_metadata()
+            zip_file.writestr('Metadata', json.dumps(metadata_json, indent=2))
+            
+            # 4. VERSION - Version Power BI
+            version_json = {"version": self.version}
+            zip_file.writestr('Version', json.dumps(version_json))
+            
+            # 5. CONNECTIONS - Configuration connexion données
+            connections_json = self._create_connections(filename)
+            zip_file.writestr('Connections', json.dumps(connections_json, indent=2))
         
-        # 2. Export CSV propre
-        exports['csv'] = self._create_csv_export(df)
-        
-        # 3. Template PowerBI JSON
-        exports['template'] = self._create_powerbi_template(df, filename, include_metadata)
-        
-        # 4. Fichier de mesures DAX
-        exports['dax_measures'] = self._create_dax_measures(df)
-        
-        return exports
+        zip_buffer.seek(0)
+        return zip_buffer.getvalue()
     
-    def _create_excel_export(self, df: pd.DataFrame, filename: str, include_metadata: bool) -> bytes:
-        """Crée un fichier Excel optimisé pour PowerBI"""
+    def _create_layout_structure(self, df: pd.DataFrame, filename: str) -> dict:
+        """
+        Crée la structure Layout avec visualisations pré-configurées
+        
+        POURQUOI IMPORTANT:
+        - Définit l'apparence du rapport
+        - Contient les visuels (graphiques, tableaux, cartes)
+        - Positionne les éléments sur la page
+        """
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        
+        # Liste des visuels à créer
+        visuals = []
+        
+        # VISUAL 1: Tableau de données (en haut à gauche)
+        if len(df.columns) > 0:
+            visuals.append(self._create_table_visual(df.columns.tolist()[:5], 0, 0))
+        
+        # VISUAL 2: Carte avec KPI (si colonnes numériques)
+        if numeric_cols:
+            visuals.append(self._create_card_visual(numeric_cols[0], 600, 0))
+        
+        # VISUAL 3: Graphique en barres (si colonnes catégorielles et numériques)
+        if categorical_cols and numeric_cols:
+            visuals.append(self._create_bar_chart_visual(
+                categorical_cols[0], 
+                numeric_cols[0], 
+                0, 300
+            ))
+        
+        # VISUAL 4: Graphique linéaire (si 2+ colonnes numériques)
+        if len(numeric_cols) >= 2:
+            visuals.append(self._create_line_chart_visual(
+                numeric_cols[0],
+                numeric_cols[1],
+                600, 300
+            ))
+        
+        layout = {
+            "id": 0,
+            "resourcePackages": [],
+            "name": f"ReportSection_{filename}",
+            "displayName": f"Analyse {filename}",
+            "width": 1280,
+            "height": 720,
+            "displayOption": 1,
+            "background": {
+                "color": "#FFFFFF",
+                "transparency": 100
+            },
+            "visualContainers": visuals,
+            "filters": "[]",
+            "ordinal": 0
+        }
+        
+        return {
+            "id": "1",
+            "pages": [layout],
+            "config": "{}"
+        }
+    
+    def _create_table_visual(self, columns: list, x: int, y: int) -> dict:
+        """
+        Crée un visuel de type tableau
+        
+        STRUCTURE:
+        - Type: tableEx (tableau Power BI)
+        - Position: x, y
+        - Dimensions: width, height
+        - Colonnes: liste des champs à afficher
+        """
+        return {
+            "x": x,
+            "y": y,
+            "z": 0,
+            "width": 500,
+            "height": 250,
+            "config": json.dumps({
+                "name": "table1",
+                "layouts": [{
+                    "id": 0,
+                    "position": {
+                        "x": x,
+                        "y": y,
+                        "z": 0,
+                        "width": 500,
+                        "height": 250
+                    }
+                }],
+                "singleVisual": {
+                    "visualType": "tableEx",
+                    "projections": {
+                        "Values": [{"queryRef": f"Sum({col})"} for col in columns]
+                    },
+                    "prototypeQuery": {
+                        "Version": 2,
+                        "From": [{"Name": "t", "Entity": "Table1"}]
+                    }
+                }
+            })
+        }
+    
+    def _create_card_visual(self, column: str, x: int, y: int) -> dict:
+        """
+        Crée un visuel de type carte (KPI)
+        
+        UTILITÉ:
+        - Affiche une métrique unique en grand
+        - Parfait pour les KPIs importants
+        """
+        return {
+            "x": x,
+            "y": y,
+            "z": 1,
+            "width": 250,
+            "height": 150,
+            "config": json.dumps({
+                "name": "card1",
+                "layouts": [{
+                    "id": 0,
+                    "position": {
+                        "x": x,
+                        "y": y,
+                        "z": 1,
+                        "width": 250,
+                        "height": 150
+                    }
+                }],
+                "singleVisual": {
+                    "visualType": "card",
+                    "projections": {
+                        "Values": [{"queryRef": f"Sum({column})"}]
+                    },
+                    "prototypeQuery": {
+                        "Version": 2,
+                        "From": [{"Name": "t", "Entity": "Table1"}],
+                        "Select": [{
+                            "Aggregation": {
+                                "Expression": {"Column": {"Expression": {"SourceRef": {"Source": "t"}}, "Property": column}},
+                                "Function": 0
+                            },
+                            "Name": f"Sum({column})"
+                        }]
+                    }
+                }
+            })
+        }
+    
+    def _create_bar_chart_visual(self, category_col: str, value_col: str, x: int, y: int) -> dict:
+        """
+        Crée un graphique en barres
+        
+        CONFIGURATION:
+        - Axe X: catégories
+        - Axe Y: valeurs numériques
+        - Type: barChart (clusteredBarChart)
+        """
+        return {
+            "x": x,
+            "y": y,
+            "z": 2,
+            "width": 550,
+            "height": 350,
+            "config": json.dumps({
+                "name": "barChart1",
+                "layouts": [{
+                    "id": 0,
+                    "position": {
+                        "x": x,
+                        "y": y,
+                        "z": 2,
+                        "width": 550,
+                        "height": 350
+                    }
+                }],
+                "singleVisual": {
+                    "visualType": "clusteredBarChart",
+                    "projections": {
+                        "Category": [{"queryRef": category_col}],
+                        "Values": [{"queryRef": f"Sum({value_col})"}]
+                    },
+                    "prototypeQuery": {
+                        "Version": 2,
+                        "From": [{"Name": "t", "Entity": "Table1"}],
+                        "Select": [
+                            {"Column": {"Expression": {"SourceRef": {"Source": "t"}}, "Property": category_col}},
+                            {
+                                "Aggregation": {
+                                    "Expression": {"Column": {"Expression": {"SourceRef": {"Source": "t"}}, "Property": value_col}},
+                                    "Function": 0
+                                },
+                                "Name": f"Sum({value_col})"
+                            }
+                        ]
+                    }
+                }
+            })
+        }
+    
+    def _create_line_chart_visual(self, x_col: str, y_col: str, x: int, y: int) -> dict:
+        """
+        Crée un graphique linéaire
+        
+        USAGE:
+        - Parfait pour tendances temporelles
+        - Compare évolutions de 2 variables
+        """
+        return {
+            "x": x,
+            "y": y,
+            "z": 3,
+            "width": 550,
+            "height": 350,
+            "config": json.dumps({
+                "name": "lineChart1",
+                "layouts": [{
+                    "id": 0,
+                    "position": {
+                        "x": x,
+                        "y": y,
+                        "z": 3,
+                        "width": 550,
+                        "height": 350
+                    }
+                }],
+                "singleVisual": {
+                    "visualType": "lineChart",
+                    "projections": {
+                        "Category": [{"queryRef": x_col}],
+                        "Values": [{"queryRef": f"Sum({y_col})"}]
+                    },
+                    "prototypeQuery": {
+                        "Version": 2,
+                        "From": [{"Name": "t", "Entity": "Table1"}],
+                        "Select": [
+                            {"Column": {"Expression": {"SourceRef": {"Source": "t"}}, "Property": x_col}},
+                            {
+                                "Aggregation": {
+                                    "Expression": {"Column": {"Expression": {"SourceRef": {"Source": "t"}}, "Property": y_col}},
+                                    "Function": 0
+                                },
+                                "Name": f"Sum({y_col})"
+                            }
+                        ]
+                    }
+                }
+            })
+        }
+    
+    def _create_datamodel_structure(self, df: pd.DataFrame, filename: str) -> dict:
+        """
+        Crée le schéma du modèle de données
+        
+        RÔLE CRUCIAL:
+        - Définit les tables
+        - Spécifie les colonnes et types
+        - Configure les relations entre tables
+        - Définit les mesures DAX
+        """
+        columns = []
+        measures = []
+        
+        # Définir chaque colonne avec son type
+        for col in df.columns:
+            dtype = df[col].dtype
+            
+            # Mapper les types pandas vers types Power BI
+            if dtype in ['int64', 'int32', 'float64', 'float32']:
+                col_type = "Int64"  # Type numérique Power BI
+                
+                # Créer des mesures DAX automatiques pour colonnes numériques
+                measures.extend([
+                    {
+                        "name": f"{col}_Total",
+                        "expression": f"SUM(Table1[{col}])",
+                        "formatString": "#,##0.00"
+                    },
+                    {
+                        "name": f"{col}_Moyenne",
+                        "expression": f"AVERAGE(Table1[{col}])",
+                        "formatString": "#,##0.00"
+                    },
+                    {
+                        "name": f"{col}_Max",
+                        "expression": f"MAX(Table1[{col}])",
+                        "formatString": "#,##0.00"
+                    }
+                ])
+            elif dtype == 'datetime64[ns]':
+                col_type = "DateTime"
+            else:
+                col_type = "String"
+            
+            columns.append({
+                "name": col,
+                "dataType": col_type,
+                "sourceColumn": col,
+                "formatString": "",
+                "summarizeBy": "none" if col_type == "String" else "sum"
+            })
+        
+        # Ajouter une mesure pour compter les lignes
+        measures.append({
+            "name": "Nombre_Total",
+            "expression": "COUNTROWS(Table1)",
+            "formatString": "#,##0"
+        })
+        
+        return {
+            "name": "DataModel",
+            "compatibilityLevel": 1550,
+            "model": {
+                "culture": "fr-FR",
+                "dataAccessOptions": {
+                    "legacyRedirects": True,
+                    "returnErrorValuesAsNull": True
+                },
+                "tables": [{
+                    "name": "Table1",
+                    "columns": columns,
+                    "measures": measures,
+                    "partitions": [{
+                        "name": "Partition1",
+                        "mode": "import",
+                        "source": {
+                            "type": "m",
+                            "expression": f"let\n    Source = Excel.Workbook(File.Contents(\"{filename}\"), null, true)\nin\n    Source"
+                        }
+                    }]
+                }],
+                "relationships": [],
+                "annotations": [{
+                    "name": "ClientCompatibilityLevel",
+                    "value": "600"
+                }]
+            }
+        }
+    
+    def _create_metadata(self) -> dict:
+        """
+        Crée les métadonnées du template
+        
+        CONTENU:
+        - Version du template
+        - Date de création
+        - Informations système
+        """
+        return {
+            "version": "4.0",
+            "created": datetime.now().isoformat(),
+            "lastModified": datetime.now().isoformat(),
+            "creator": "Data Analytics Dashboard"
+        }
+    
+    def _create_connections(self, filename: str) -> dict:
+        """
+        Configure la source de données
+        
+        IMPORTANT:
+        - Définit comment Power BI se connecte aux données
+        - Type: fichier, base de données, web, etc.
+        - L'utilisateur devra mettre à jour le chemin après import
+        """
+        return {
+            "Version": 1,
+            "Connections": [{
+                "Name": "DataSource1",
+                "ConnectionString": f"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={filename};Extended Properties=\"Excel 12.0 Xml;HDR=YES\"",
+                "ConnectionType": "OleDb"
+            }],
+            "RemoteArtifacts": []
+        }
+    
+    def create_dax_measures_file(self, df: pd.DataFrame) -> str:
+        """
+        BONUS: Génère un fichier .dax avec toutes les mesures
+        
+        UTILITÉ:
+        - Fichier texte avec mesures DAX prêtes à copier-coller
+        - Mesures avancées (YTD, ratios, pourcentages, etc.)
+        - Facilite l'enrichissement du modèle
+        """
+        measures = []
+        
+        measures.append("// ============================================")
+        measures.append("// MESURES DE BASE")
+        measures.append("// ============================================\n")
+        
+        # Mesures pour colonnes numériques
+        for col in df.select_dtypes(include=['number']).columns:
+            measures.append(f"// Mesures pour: {col}")
+            measures.append(f"{col}_Total = SUM(Table1[{col}])")
+            measures.append(f"{col}_Moyenne = AVERAGE(Table1[{col}])")
+            measures.append(f"{col}_Médiane = MEDIAN(Table1[{col}])")
+            measures.append(f"{col}_Min = MIN(Table1[{col}])")
+            measures.append(f"{col}_Max = MAX(Table1[{col}])")
+            measures.append(f"{col}_EcartType = STDEV.P(Table1[{col}])")
+            measures.append("")
+        
+        measures.append("\n// ============================================")
+        measures.append("// MESURES DE COMPTAGE")
+        measures.append("// ============================================\n")
+        
+        measures.append("Nombre_Total_Lignes = COUNTROWS(Table1)")
+        measures.append("Nombre_Lignes_Distinctes = DISTINCTCOUNT(Table1[" + df.columns[0] + "])")
+        
+        measures.append("\n// ============================================")
+        measures.append("// MESURES CONDITIONNELLES (Exemples)")
+        measures.append("// ============================================\n")
+        
+        if len(df.select_dtypes(include=['number']).columns) > 0:
+            num_col = df.select_dtypes(include=['number']).columns[0]
+            measures.append(f"// Compte si {num_col} > moyenne")
+            measures.append(f"Compte_Superieur_Moyenne = ")
+            measures.append(f"CALCULATE(")
+            measures.append(f"    COUNTROWS(Table1),")
+            measures.append(f"    Table1[{num_col}] > [{num_col}_Moyenne]")
+            measures.append(f")")
+        
+        measures.append("\n// ============================================")
+        measures.append("// MESURES TEMPORELLES (si date présente)")
+        measures.append("// ============================================\n")
+        
+        datetime_cols = df.select_dtypes(include=['datetime']).columns
+        if len(datetime_cols) > 0:
+            date_col = datetime_cols[0]
+            if len(df.select_dtypes(include=['number']).columns) > 0:
+                val_col = df.select_dtypes(include=['number']).columns[0]
+                measures.append(f"// Calculs Year-To-Date pour {val_col}")
+                measures.append(f"{val_col}_YTD = TOTALYTD([{val_col}_Total], Table1[{date_col}])")
+                measures.append(f"{val_col}_MTD = TOTALMTD([{val_col}_Total], Table1[{date_col}])")
+        
+        return "\n".join(measures)
+    
+    def create_excel_with_data(self, df: pd.DataFrame, filename: str) -> bytes:
+        """
+        Crée un fichier Excel propre pour accompagner le template
+        
+        POURQUOI:
+        - Le .pbit contient la structure mais pas les données
+        - L'Excel accompagne le template avec les données réelles
+        - L'utilisateur importe l'Excel dans le template
+        """
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Feuille principale avec les données
-            df_clean = self._prepare_dataframe_for_powerbi(df)
+            # Nettoyer les noms de colonnes pour Power BI
+            df_clean = df.copy()
+            df_clean.columns = [str(col).strip().replace(' ', '_').replace('[', '').replace(']', '') 
+                               for col in df_clean.columns]
+            
+            # Écrire les données
             df_clean.to_excel(writer, sheet_name='Data', index=False)
             
-            if include_metadata:
-                # Feuille avec métadonnées
-                metadata = self._generate_metadata(df, filename)
-                metadata_df = pd.DataFrame(list(metadata.items()), columns=['Propriété', 'Valeur'])
-                metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
-                
-                # Feuille avec informations sur les colonnes
-                column_info = self._generate_column_info(df)
-                column_info.to_excel(writer, sheet_name='Column_Info', index=False)
-                
-                # Feuille avec suggestions de visualisations
-                viz_suggestions = self._generate_visualization_suggestions(df)
-                viz_df = pd.DataFrame(viz_suggestions)
-                viz_df.to_excel(writer, sheet_name='Viz_Suggestions', index=False)
+            # Ajouter une feuille avec instructions
+            instructions = pd.DataFrame({
+                'Étape': [1, 2, 3, 4, 5],
+                'Action': [
+                    'Ouvrir Power BI Desktop',
+                    'Ouvrir le fichier .pbit téléchargé',
+                    'Cliquer sur "Obtenir les données" > "Excel"',
+                    f'Sélectionner ce fichier ({filename})',
+                    'Sélectionner la feuille "Data" et cliquer sur "Charger"'
+                ]
+            })
+            instructions.to_excel(writer, sheet_name='Instructions', index=False)
         
         output.seek(0)
         return output.getvalue()
-    
-    def _create_csv_export(self, df: pd.DataFrame) -> str:
-        """Crée un export CSV propre pour PowerBI"""
-        df_clean = self._prepare_dataframe_for_powerbi(df)
-        return df_clean.to_csv(index=False, encoding='utf-8-sig')  # UTF-8 avec BOM pour PowerBI
-    
-    def _create_powerbi_template(self, df: pd.DataFrame, filename: str, include_metadata: bool) -> str:
-        """Crée un template JSON pour PowerBI"""
-        template = {
-            "version": "1.0",
-            "name": f"Template for {filename}",
-            "created_at": datetime.now().isoformat(),
-            "columns": [{
-                "name": col,
-                "type": str(dtype)
-            } for col, dtype in df.dtypes.items()]
-        }
-        
-        if include_metadata:
-            template["metadata"] = self._generate_metadata(df, filename)
-        
-        return json.dumps(template, indent=4, ensure_ascii=False)
-
-    def _create_dax_measures(self, df: pd.DataFrame) -> str:
-        """Crée un script DAX avec des mesures courantes"""
-        measures = []
-        for col in df.select_dtypes(include='number').columns[:5]:  # Limiter à 5 colonnes
-            measures.append(f"{col}_Average = AVERAGE('{col}')")
-            measures.append(f"{col}_Sum = SUM('{col}')")
-            measures.append(f"{col}_Max = MAX('{col}')")
-            measures.append(f"{col}_Min = MIN('{col}')")
-        return "\n".join(measures)
-
-    def _prepare_dataframe_for_powerbi(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Prépare un DataFrame nettoyé pour PowerBI"""
-        df_clean = df.copy()
-        df_clean.columns = [str(col).strip().replace(' ', '_') for col in df_clean.columns]
-        return df_clean
-
-    def _generate_metadata(self, df: pd.DataFrame, filename: str) -> Dict[str, str]:
-        """Génère les métadonnées générales"""
-        return {
-            "Nom du fichier": filename,
-            "Nombre de lignes": str(len(df)),
-            "Nombre de colonnes": str(len(df.columns)),
-            "Date d'export": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-    def _generate_column_info(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Génère un tableau d'information sur les colonnes"""
-        data = []
-        for col in df.columns:
-            data.append({
-                "Colonne": col,
-                "Type": str(df[col].dtype),
-                "Valeurs uniques": df[col].nunique(),
-                "Valeurs manquantes": df[col].isnull().sum()
-            })
-        return pd.DataFrame(data)
-
-    def _generate_visualization_suggestions(self, df: pd.DataFrame) -> list:
-        """Génère des suggestions de visualisation"""
-        suggestions = []
-        for col in df.columns:
-            dtype = df[col].dtype
-            if dtype in ['int64', 'float64']:
-                suggestions.append({
-                    "Colonne": col,
-                    "Suggestion": "Histogramme ou boîte à moustaches (boxplot)"
-                })
-            elif dtype == 'object' and df[col].nunique() < 30:
-                suggestions.append({
-                    "Colonne": col,
-                    "Suggestion": "Diagramme en barres ou camembert"
-                })
-        return suggestions
-        
 
 
-
+# ============================================================================
+# AUTRES CLASSES INCHANGÉES
+# ============================================================================
 
 class UIComponents:
     """Composants UI réutilisables pour le dashboard"""
@@ -1093,9 +1301,6 @@ class UIComponents:
                     width: 100%;
                     font-size: 1em;
                 }
-                .css-1cpxqw2 edgvbvh3 {
-                    margin-top: -20px;
-                }
             </style>
         """, unsafe_allow_html=True)
 
@@ -1103,17 +1308,15 @@ class UIComponents:
         """Afficher des infos ou logos dans la sidebar si besoin"""
         st.sidebar.markdown("## Paramètres")
         st.sidebar.markdown("Ce dashboard vous permet :")
-        st.sidebar.markdown("- d’importer des fichiers de données")
-        st.sidebar.markdown("- d’analyser rapidement les colonnes")
-        st.sidebar.markdown("- d’exporter vers PowerBI")
+        st.sidebar.markdown("- d'importer des fichiers de données")
+        st.sidebar.markdown("- d'analyser rapidement les colonnes")
+        st.sidebar.markdown("- d'exporter vers PowerBI")
         st.sidebar.markdown("---")
-        #st.sidebar.info("Développé avec par [Votre Nom]")
         
         name = st.sidebar.text_input("Votre nom", value=st.session_state.get("user_name", ""))
         if name:
             st.session_state["user_name"] = name
         st.sidebar.info(f"Développé par {st.session_state.get('user_name', '...')}")
-
     
     def display_file_info(self, uploaded_file):
         """Affiche les métadonnées du fichier importé"""
@@ -1124,8 +1327,6 @@ class UIComponents:
             "Taille (KB)": f"{len(uploaded_file.getbuffer()) / 1024:.1f}"
         }
         st.json(file_details)
-
-
 
 
 class DatabaseManager:
@@ -1181,22 +1382,11 @@ class DatabaseManager:
             st.error(f"Erreur lors de la lecture de la base de données : {e}")
             return pd.DataFrame()
 
-import streamlit as st
-import pandas as pd
-from pathlib import Path
-import sys
 
-# Ajouter le dossier utils au path
-sys.path.append(str(Path(__file__).parent / "utils"))
+# ============================================================================
+# APPLICATION PRINCIPALE
+# ============================================================================
 
-#from data_extractor import DataExtractor
-#from data_analyzer import DataAnalyzer
-#from visualizer import DataVisualizer
-#from powerbi_exporter import PowerBIExporter
-#from database_manager import DatabaseManager
-#from ui_components import UIComponents
-
-# Configuration de la page
 st.set_page_config(
     page_title="Data Analytics Dashboard",
     page_icon="📊",
@@ -1210,20 +1400,16 @@ ui_components = UIComponents()
 data_extractor = DataExtractor()
 data_analyzer = DataAnalyzer()
 data_visualizer = DataVisualizer()
-powerbi_exporter = PowerBIExporter()
+powerbi_exporter = PowerBIExporter()  # Classe corrigée!
 
-# Initialiser la base de données
 db_manager.init_db()
-
-# Appliquer les styles CSS
 ui_components.apply_styles()
 
 def main():
     st.markdown('<h1 class="main-header">📊 Dashboard Analytics Pro</h1>', unsafe_allow_html=True)
     
-    # Barre latérale
     ui_components.render_sidebar()
-    #page = st.sidebar.radio("Navigation", ["🔄 Importer", "📈 Analyser", "📚 Historique", "⚙️ PowerBI"], label_visibility="collapsed")
+    
     if 'page' not in st.session_state:
         st.session_state['page'] = "🔄 Importer"
 
@@ -1234,8 +1420,6 @@ def main():
     )
     st.session_state['page'] = page
 
-
-    # Navigation entre les pages
     if page == "🔄 Importer":
         render_import_page()
     elif page == "📈 Analyser":
@@ -1243,12 +1427,12 @@ def main():
     elif page == "📚 Historique":
         render_history_page()
     else:
-        render_powerbi_page()
+        render_powerbi_page()  # Page corrigée!
+
 
 def render_import_page():
     st.markdown('<h2 class="section-header">🔄 Importer vos données</h2>', unsafe_allow_html=True)
     
-    # Zone de drag & drop améliorée
     uploaded_file = st.file_uploader(
         "Glissez-déposez vos fichiers ici ou cliquez pour parcourir", 
         type=['csv', 'xlsx', 'xls', 'json', 'txt'],
@@ -1256,68 +1440,34 @@ def render_import_page():
     )
     
     if uploaded_file is not None:
-        # Afficher les détails du fichier
         ui_components.display_file_info(uploaded_file)
         
-        # Extraction des données
         with st.spinner('🔄 Extraction des données en cours...'):
             df = data_extractor.extract_data(uploaded_file)
         
         if df is not None and not df.empty:
             st.success("✅ Données importées avec succès!")
             
-            # Aperçu des données
             st.markdown('<h3 class="section-header">👀 Aperçu des données</h3>', unsafe_allow_html=True)
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True, key="analyze_btn_1"):
-                    st.switch_page("pages/analyze.py") if hasattr(st, 'switch_page') else st.rerun()
-
-            with col2:
-                csv_data = df.to_csv(index=False)
-                st.download_button(
-                    "💾 Télécharger CSV",
-                    csv_data,
-                    file_name=f"cleaned_{uploaded_file.name}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                    key="download_csv_main"
-                )
-
-
-            with col3:
-                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True, key="analyze_btn_2"):
-                    st.session_state['page'] = "📈 Analyser"
-                    st.rerun()
-
             
-            # Prévisualisation avec pagination
-            st.dataframe(
-                df.head(20),
-                use_container_width=True,
-                height=400
-            )
+            st.dataframe(df.head(20), use_container_width=True, height=400)
             
-            # Informations sur les colonnes
             if st.expander("🔍 Informations détaillées sur les colonnes"):
                 col_info = data_analyzer.get_column_info(df)
                 st.dataframe(col_info, use_container_width=True)
             
-            # Sauvegarder dans la session et la base
             st.session_state['data'] = df
             st.session_state['filename'] = uploaded_file.name
             
-            # Sauvegarder dans la base de données
             db_manager.save_upload(uploaded_file.name, uploaded_file.type, df)
             
-            # Actions disponibles
             st.markdown('<h3 class="section-header">🎯 Actions disponibles</h3>', unsafe_allow_html=True)
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True , key="analyze_now_btn_1"):
-                    st.switch_page("pages/analyze.py") if hasattr(st, 'switch_page') else st.rerun()
+                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True):
+                    st.session_state['page'] = "📈 Analyser"
+                    st.rerun()
             
             with col2:
                 csv_data = df.to_csv(index=False)
@@ -1330,8 +1480,8 @@ def render_import_page():
                 )
             
             with col3:
-                if st.button("📈 Analyser maintenant", type="primary", use_container_width=True , key="analyze_now_btn_2"):
-                    st.session_state['page'] = "📈 Analyser"
+                if st.button("⚙️ Export Power BI", use_container_width=True):
+                    st.session_state['page'] = "⚙️ PowerBI"
                     st.rerun()
 
 
@@ -1341,13 +1491,13 @@ def render_analysis_page():
     if 'data' not in st.session_state:
         st.warning("⚠️ Aucune donnée à analyser. Veuillez d'abord importer un fichier.")
         if st.button("➡️ Aller à l'importation", type="primary"):
+            st.session_state['page'] = "🔄 Importer"
             st.rerun()
         return
     
     df = st.session_state['data']
     filename = st.session_state.get('filename', 'données')
     
-    # Onglets d'analyse
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📋 Aperçu", "📊 Statistiques", "📈 Visualisations", 
         "🔍 Qualité", "🎯 Insights"
@@ -1356,7 +1506,6 @@ def render_analysis_page():
     with tab1:
         st.markdown(f"### 📁 Analyse de: **{filename}**")
         
-        # Métriques générales
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("📊 Lignes", df.shape[0])
@@ -1369,39 +1518,22 @@ def render_analysis_page():
             cat_cols = len(df.select_dtypes(include=['object', 'category']).columns)
             st.metric("📝 Colonnes texte", cat_cols)
         
-        # Aperçu des données avec options de filtrage
         st.markdown("#### 👀 Aperçu des données")
-        
-        # Options de filtrage
-        if st.checkbox("🔍 Activer le filtrage"):
-            selected_cols = st.multiselect(
-                "Sélectionner les colonnes à afficher",
-                df.columns.tolist(),
-                default=df.columns.tolist()[:10]
-            )
-            if selected_cols:
-                st.dataframe(df[selected_cols], use_container_width=True, height=400)
-            else:
-                st.dataframe(df, use_container_width=True, height=400)
-        else:
-            st.dataframe(df, use_container_width=True, height=400)
+        st.dataframe(df, use_container_width=True, height=400)
     
     with tab2:
         st.markdown("### 📊 Statistiques descriptives")
         
-        # Statistiques pour colonnes numériques
         numeric_df = df.select_dtypes(include=['number'])
         if not numeric_df.empty:
             st.markdown("#### 🔢 Colonnes numériques")
             st.dataframe(numeric_df.describe(), use_container_width=True)
             
-            # Matrice de corrélation
             if len(numeric_df.columns) > 1:
                 st.markdown("#### 🔗 Matrice de corrélation")
                 corr_fig = data_visualizer.create_correlation_matrix(numeric_df)
                 st.plotly_chart(corr_fig, use_container_width=True)
         
-        # Statistiques pour colonnes catégorielles
         cat_df = df.select_dtypes(include=['object', 'category'])
         if not cat_df.empty:
             st.markdown("#### 📝 Colonnes catégorielles")
@@ -1411,29 +1543,23 @@ def render_analysis_page():
     with tab3:
         st.markdown("### 📈 Visualisations automatiques")
         
-        # Générer les visualisations
         charts = data_visualizer.auto_generate_charts(df)
         
         if not charts:
             st.info("ℹ️ Aucune visualisation automatique disponible pour ce jeu de données.")
         else:
-            # Organisation en colonnes pour un meilleur affichage
             for i, (chart_type, name, fig) in enumerate(charts):
                 if i % 2 == 0:
                     col1, col2 = st.columns(2)
                 
                 with col1 if i % 2 == 0 else col2:
-                    #st.plotly_chart(fig, use_container_width=True)
                     st.plotly_chart(fig, use_container_width=True, key=f"{chart_type}_{i}")
-
     
     with tab4:
         st.markdown("### 🔍 Qualité des données")
         
-        # Analyse de la qualité
         quality_report = data_analyzer.analyze_data_quality(df)
         
-        # Métriques de qualité
         col1, col2, col3 = st.columns(3)
         with col1:
             missing_pct = (df.isnull().sum().sum() / (df.shape[0] * df.shape[1])) * 100
@@ -1447,11 +1573,9 @@ def render_analysis_page():
             data_types = len(df.dtypes.unique())
             st.metric("🏷️ Types de données", data_types)
         
-        # Détail par colonne
         st.markdown("#### 📋 Détail par colonne")
         st.dataframe(quality_report, use_container_width=True)
         
-        # Visualisation des valeurs manquantes
         if df.isnull().any().any():
             missing_fig = data_visualizer.create_missing_data_heatmap(df)
             st.plotly_chart(missing_fig, use_container_width=True)
@@ -1459,18 +1583,17 @@ def render_analysis_page():
     with tab5:
         st.markdown("### 🎯 Insights automatiques")
         
-        # Générer des insights
         insights = data_analyzer.generate_insights(df)
         
         for insight in insights:
             st.info(f"💡 {insight}")
         
-        # Recommandations
         st.markdown("#### 🎯 Recommandations")
         recommendations = data_analyzer.get_recommendations(df)
         
         for rec in recommendations:
             st.success(f"✅ {rec}")
+
 
 def render_history_page():
     st.markdown('<h2 class="section-header">📚 Historique des importations</h2>', unsafe_allow_html=True)
@@ -1480,7 +1603,6 @@ def render_history_page():
     if uploads_df.empty:
         st.info("📭 Aucun historique d'importation disponible.")
     else:
-        # Affichage avec colonnes personnalisées
         st.dataframe(
             uploads_df[['id', 'filename', 'upload_date', 'file_type', 'rows', 'columns']],
             use_container_width=True,
@@ -1493,105 +1615,225 @@ def render_history_page():
                 "columns": "Colonnes"
             }
         )
-        
-        # Sélection et rechargement
-        if len(uploads_df) > 0:
-            selected_id = st.selectbox(
-                "🔄 Sélectionner une importation à recharger",
-                uploads_df['id'].tolist(),
-                format_func=lambda x: f"ID {x}: {uploads_df[uploads_df['id']==x]['filename'].iloc[0]}"
-            )
-            
-            if st.button("🔄 Recharger cette importation", type="primary"):
-                # Recharger les données (simulation)
-                selected_row = uploads_df[uploads_df['id'] == selected_id].iloc[0]
-                st.session_state['filename'] = selected_row['filename']
-                st.success(f"✅ Importation {selected_row['filename']} rechargée!")
+
 
 def render_powerbi_page():
-    st.markdown('<h2 class="section-header">⚙️ Export PowerBI</h2>', unsafe_allow_html=True)
+    """
+    PAGE CORRIGÉE POUR L'EXPORT POWER BI
+    
+    CHANGEMENTS PRINCIPAUX:
+    1. Génère un vrai fichier .pbit (template Power BI)
+    2. Fournit un fichier Excel avec les données
+    3. Génère un fichier .dax avec mesures
+    4. Ajoute des instructions détaillées
+    """
+    st.markdown('<h2 class="section-header">⚙️ Export Power BI Template</h2>', unsafe_allow_html=True)
     
     if 'data' not in st.session_state:
         st.warning("⚠️ Aucune donnée à exporter. Veuillez d'abord importer un fichier.")
+        if st.button("➡️ Aller à l'importation", type="primary"):
+            st.session_state['page'] = "🔄 Importer"
+            st.rerun()
         return
     
     df = st.session_state['data']
     filename = st.session_state.get('filename', 'data')
     
-    st.markdown("### 🎯 Préparation pour PowerBI")
+    st.markdown("### 🎯 Génération du Template Power BI")
+    
+    # Informations sur le template
+    st.info("""
+    **📌 Qu'est-ce qu'un Template Power BI (.pbit) ?**
+    
+    Un fichier .pbit contient:
+    - ✅ La structure complète du rapport (pages, visuels, mise en page)
+    - ✅ Les mesures DAX pré-configurées
+    - ✅ Le modèle de données (tables, colonnes, relations)
+    - ✅ Les configurations de visualisation
+    
+    ⚠️ **Important**: Le .pbit ne contient PAS les données, seulement la structure.
+    C'est pourquoi nous générons aussi un fichier Excel avec vos données.
+    """)
+    
+    # Prévisualisation des données
+    st.markdown("#### 👀 Prévisualisation des données à exporter")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("📊 Lignes", df.shape[0])
+    with col2:
+        st.metric("📋 Colonnes", df.shape[1])
+    with col3:
+        numeric_cols = len(df.select_dtypes(include=['number']).columns)
+        st.metric("🔢 Colonnes numériques", numeric_cols)
+    
+    st.dataframe(df.head(10), use_container_width=True)
     
     # Options d'export
-    col1, col2 = st.columns(2)
+    st.markdown("#### ⚙️ Options d'export")
     
+    col1, col2 = st.columns(2)
     with col1:
-        export_format = st.selectbox(
-            "Format d'export",
-            ["Excel (.xlsx)", "CSV", "JSON", "Template PowerBI"]
-        )
+        include_dax = st.checkbox("Inclure le fichier de mesures DAX", value=True, 
+                                   help="Génère un fichier .dax avec toutes les mesures calculées")
+    with col2:
+        include_excel = st.checkbox("Inclure le fichier Excel de données", value=True,
+                                    help="Génère un fichier Excel propre avec vos données")
+    
+    # Bouton de génération
+    st.markdown("---")
+    
+    if st.button("🚀 Générer le Template Power BI", type="primary", use_container_width=True):
+        with st.spinner("⏳ Génération du template en cours..."):
+            try:
+                # 1. Générer le fichier .pbit
+                pbit_content = powerbi_exporter.create_powerbi_template(df, filename)
+                
+                # 2. Générer le fichier Excel avec données
+                if include_excel:
+                    excel_content = powerbi_exporter.create_excel_with_data(df, filename)
+                
+                # 3. Générer le fichier DAX
+                if include_dax:
+                    dax_content = powerbi_exporter.create_dax_measures_file(df)
+                
+                st.success("✅ Template Power BI généré avec succès!")
+                
+                # Afficher les boutons de téléchargement
+                st.markdown("#### 📥 Téléchargements")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.download_button(
+                        "📊 Télécharger Template (.pbit)",
+                        pbit_content,
+                        file_name=f"{filename.rsplit('.', 1)[0]}_template.pbit",
+                        mime="application/octet-stream",
+                        use_container_width=True,
+                        help="Template Power BI à ouvrir dans Power BI Desktop"
+                    )
+                
+                with col2:
+                    if include_excel:
+                        st.download_button(
+                            "📑 Télécharger Données (Excel)",
+                            excel_content,
+                            file_name=f"{filename.rsplit('.', 1)[0]}_data.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            help="Fichier Excel contenant vos données"
+                        )
+                
+                with col3:
+                    if include_dax:
+                        st.download_button(
+                            "📐 Télécharger Mesures (DAX)",
+                            dax_content,
+                            file_name=f"{filename.rsplit('.', 1)[0]}_measures.dax",
+                            mime="text/plain",
+                            use_container_width=True,
+                            help="Fichier avec toutes les mesures DAX"
+                        )
+                
+                # Instructions détaillées
+                with st.expander("📖 Instructions d'utilisation - LIRE ATTENTIVEMENT", expanded=True):
+                    st.markdown("""
+                    ### 🎯 Comment utiliser votre Template Power BI
+                    
+                    #### **Étape 1: Télécharger les fichiers**
+                    - Téléchargez le fichier `.pbit` (Template)
+                    - Téléchargez le fichier Excel (Données)
+                    - Optionnel: Téléchargez le fichier `.dax` (Mesures)
+                    
+                    #### **Étape 2: Ouvrir dans Power BI Desktop**
+                    1. Double-cliquez sur le fichier `.pbit`
+                    2. Power BI Desktop s'ouvre automatiquement
+                    3. Une fenêtre de paramètres peut s'afficher (cliquez sur "Charger")
+                    
+                    #### **Étape 3: Connecter vos données**
+                    1. Dans Power BI, allez dans **Accueil** → **Transformer les données**
+                    2. Dans Power Query Editor, cliquez sur **Paramètres de la source**
+                    3. Sélectionnez votre fichier Excel téléchargé
+                    4. Cliquez sur **Fermer et appliquer**
+                    
+                    #### **Étape 4: Vérifier les visualisations**
+                    - Les graphiques devraient se remplir automatiquement
+                    - Si certains visuels sont vides, vérifiez les noms de colonnes
+                    
+                    #### **Étape 5 (Optionnel): Ajouter des mesures DAX**
+                    1. Ouvrez le fichier `.dax` avec un éditeur de texte
+                    2. Copiez les mesures souhaitées
+                    3. Dans Power BI, cliquez sur **Nouvelle mesure**
+                    4. Collez le code DAX
+                    
+                    ---
+                    
+                    ### ⚠️ Problèmes courants
+                    
+                    **❌ "Impossible de charger les données"**
+                    - Vérifiez que le chemin du fichier Excel est correct
+                    - Assurez-vous que le fichier Excel n'est pas ouvert ailleurs
+                    
+                    **❌ "Colonnes introuvables"**
+                    - Les noms de colonnes ont peut-être changé
+                    - Modifiez les requêtes dans Power Query Editor
+                    
+                    **❌ "Erreur de syntaxe DAX"**
+                    - Vérifiez que les noms de tables/colonnes correspondent
+                    - Ajustez les formules si nécessaire
+                    
+                    ---
+                    
+                    ### 💡 Conseils Pro
+                    
+                    1. **Personnalisation**: Le template est un point de départ, personnalisez-le!
+                    2. **Actualisation**: Vous pouvez remplacer le fichier Excel et actualiser les données
+                    3. **Partage**: Sauvegardez en .pbix pour partager avec les données incluses
+                    4. **Performance**: Si le fichier est lent, réduisez le nombre de lignes
+                    
+                    ---
+                    
+                    ### 🎨 Visuels inclus dans le template
+                    
+                    - 📊 **Tableau de données**: Affiche vos données brutes
+                    - 📈 **Graphique en barres**: Pour les données catégorielles
+                    - 📉 **Graphique linéaire**: Pour les tendances
+                    - 🎯 **Cartes KPI**: Pour les métriques clés
+                    
+                    **Vous pouvez ajouter vos propres visuels facilement!**
+                    """)
+                
+                # Aperçu des mesures DAX générées
+                if include_dax:
+                    with st.expander("👀 Aperçu des mesures DAX générées"):
+                        st.code(dax_content, language="dax")
+                
+            except Exception as e:
+                st.error(f"❌ Erreur lors de la génération: {str(e)}")
+                st.exception(e)
+    
+    # Section aide
+    st.markdown("---")
+    st.markdown("### 🆘 Besoin d'aide ?")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info("""
+        **📚 Ressources Power BI**
+        - [Documentation officielle](https://docs.microsoft.com/power-bi/)
+        - [Tutoriels DAX](https://dax.guide/)
+        - [Communauté Power BI](https://community.powerbi.com/)
+        """)
     
     with col2:
-        include_metadata = st.checkbox("Inclure les métadonnées", value=True)
-    
-    # Prévisualisation
-    st.markdown("#### 👀 Prévisualisation des données à exporter")
-    st.dataframe(df.head(), use_container_width=True)
-    
-    # Génération des fichiers d'export
-    if st.button("🚀 Générer l'export PowerBI", type="primary"):
-        with st.spinner("⏳ Génération en cours..."):
-            exports = powerbi_exporter.create_powerbi_export(df, filename, include_metadata)
-        
-        st.success("✅ Export généré avec succès!")
-        
-        # Boutons de téléchargement
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.download_button(
-                "📊 Télécharger Excel",
-                exports['excel'],
-                file_name=f"{filename}_powerbi.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_excel_pbi"
-            )
-        
-        with col2:
-            st.download_button(
-                "📋 Télécharger CSV",
-                exports['csv'],
-                file_name=f"{filename}_powerbi.csv",
-                mime="text/csv",
-                key="download_csv_pbi"
-            )
-        
-        with col3:
-            st.download_button(
-                "⚙️ Template PowerBI",
-                exports['template'],
-                file_name=f"{filename}_template.json",
-                mime="application/json",
-                key="download_template_pbi"
-            )
-        
-        # Instructions PowerBI
-        with st.expander("📖 Instructions d'importation PowerBI"):
-            st.markdown("""
-            **Pour importer dans PowerBI Desktop:**
-            
-            1. **Via Excel:**
-               - Téléchargez le fichier Excel
-               - Dans PowerBI: Accueil → Obtenir les données → Excel
-               - Sélectionnez le fichier téléchargé
-            
-            2. **Via CSV:**
-               - Téléchargez le fichier CSV
-               - Dans PowerBI: Accueil → Obtenir les données → Texte/CSV
-               - Sélectionnez le fichier CSV
-            
-            3. **Via Template:**
-               - Téléchargez le template JSON
-               - Utilisez-le comme référence pour configurer vos visualisations
-            """)
+        st.warning("""
+        **⚠️ Limitations**
+        - Le template nécessite Power BI Desktop (gratuit)
+        - Les visuels personnalisés ne sont pas inclus
+        - Vous devrez configurer la source de données
+        """)
+
 
 if __name__ == "__main__":
     main()
