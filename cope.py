@@ -924,9 +924,8 @@ class DataVisualizer:
 
 
 
-
 class PowerBIExporter:
-    """Classe pour exporter les données vers PowerBI"""
+    """Classe pour exporter les données vers PowerBI avec génération de template .pbit"""
     
     def __init__(self):
         pass
@@ -951,34 +950,530 @@ class PowerBIExporter:
         # 2. Export CSV propre
         exports['csv'] = self._create_csv_export(df)
         
-        # 3. Template PowerBI JSON
+        # 3. Template PowerBI JSON (simplifié)
         exports['template'] = self._create_powerbi_template(df, filename, include_metadata)
         
         # 4. Fichier de mesures DAX
         exports['dax_measures'] = self._create_dax_measures(df)
         
+        # 5. NOUVEAU: Template PowerBI complet (.pbit)
+        exports['pbit'] = self._create_pbit_template(df, filename, include_metadata)
+        
+        # 6. NOUVEAU: Rapport PowerBI pré-configuré (JSON)
+        exports['report_config'] = self._create_report_configuration(df, filename)
+        
         return exports
+    
+    def _create_pbit_template(self, df: pd.DataFrame, filename: str, include_metadata: bool) -> bytes:
+        """
+        Crée un fichier .pbit (PowerBI Template) complet
+        
+        Un fichier .pbit est essentiellement un fichier ZIP contenant:
+        - DataModelSchema: schéma du modèle de données
+        - Report/Layout: configuration des visualisations
+        - DiagramState: état des diagrammes
+        - [Content_Types].xml: types de contenu
+        """
+        
+        # Créer un buffer pour le fichier ZIP
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            
+            # 1. DataModelSchema - Schéma du modèle de données
+            data_model_schema = self._create_data_model_schema(df, filename)
+            zip_file.writestr('DataModelSchema', json.dumps(data_model_schema, indent=2))
+            
+            # 2. Report/Layout - Configuration du rapport
+            report_layout = self._create_report_layout(df, filename)
+            zip_file.writestr('Report/Layout', json.dumps(report_layout, indent=2))
+            
+            # 3. DiagramLayout - Disposition des tables
+            diagram_layout = self._create_diagram_layout(df)
+            zip_file.writestr('DiagramLayout', json.dumps(diagram_layout, indent=2))
+            
+            # 4. Version - Version du template
+            version_info = {
+                "version": "2.0",
+                "powerBIVersion": "2.0"
+            }
+            zip_file.writestr('Version', json.dumps(version_info))
+            
+            # 5. [Content_Types].xml - Types de contenu (requis pour PowerBI)
+            content_types_xml = self._create_content_types_xml()
+            zip_file.writestr('[Content_Types].xml', content_types_xml)
+            
+            # 6. SecurityBindings - Configuration de sécurité (optionnel)
+            security_bindings = self._create_security_bindings()
+            zip_file.writestr('SecurityBindings', json.dumps(security_bindings))
+            
+            # 7. Metadata - Métadonnées du template
+            if include_metadata:
+                metadata = {
+                    "name": f"Template_{filename}",
+                    "description": f"Template PowerBI généré automatiquement pour {filename}",
+                    "createdDate": datetime.now().isoformat(),
+                    "datasetConfiguration": self._create_dataset_configuration(df)
+                }
+                zip_file.writestr('Metadata', json.dumps(metadata, indent=2))
+        
+        zip_buffer.seek(0)
+        return zip_buffer.getvalue()
+    
+    def _create_data_model_schema(self, df: pd.DataFrame, filename: str) -> Dict:
+        """Crée le schéma du modèle de données pour PowerBI"""
+        
+        # Mapper les types pandas vers les types PowerBI
+        type_mapping = {
+            'int64': 'Int64',
+            'int32': 'Int64',
+            'float64': 'Double',
+            'float32': 'Double',
+            'object': 'String',
+            'bool': 'Boolean',
+            'datetime64[ns]': 'DateTime',
+            'category': 'String'
+        }
+        
+        # Créer les colonnes pour le modèle
+        columns = []
+        for col_name, col_type in df.dtypes.items():
+            column_def = {
+                "name": str(col_name),
+                "dataType": type_mapping.get(str(col_type), 'String'),
+                "isHidden": False,
+                "sortByColumn": None,
+                "formatString": self._get_format_string(df[col_name], str(col_type)),
+                "summarizeBy": self._get_summarize_by(str(col_type))
+            }
+            columns.append(column_def)
+        
+        # Créer la table principale
+        table_name = filename.replace('.', '_').replace(' ', '_')
+        
+        schema = {
+            "name": "SemanticModel",
+            "compatibilityLevel": 1567,
+            "model": {
+                "culture": "fr-FR",
+                "dataAccessOptions": {
+                    "legacyRedirects": True,
+                    "returnErrorValuesAsNull": True
+                },
+                "tables": [
+                    {
+                        "name": table_name,
+                        "columns": columns,
+                        "partitions": [
+                            {
+                                "name": "Partition",
+                                "mode": "import",
+                                "source": {
+                                    "type": "m",
+                                    "expression": self._create_m_query(filename, table_name)
+                                }
+                            }
+                        ],
+                        "measures": self._create_measures_definitions(df)
+                    }
+                ],
+                "relationships": [],
+                "roles": [],
+                "annotations": [
+                    {
+                        "name": "ClientCompatibilityLevel",
+                        "value": "700"
+                    }
+                ]
+            }
+        }
+        
+        return schema
+    
+    def _create_m_query(self, filename: str, table_name: str) -> str:
+        """Crée une requête M (Power Query) pour charger les données"""
+        
+        # Génère une requête M de base qui devra être ajustée par l'utilisateur
+        m_query = f'''let
+    Source = Excel.Workbook(File.Contents("CHEMIN_DU_FICHIER/{filename}"), null, true),
+    {table_name}_Sheet = Source{{[Item="{table_name}",Kind="Sheet"]}}[Data],
+    #"En-têtes promus" = Table.PromoteHeaders({table_name}_Sheet, [PromoteAllScalars=true]),
+    #"Type modifié" = Table.TransformColumnTypes(#"En-têtes promus", {{/* Types à définir */}})
+in
+    #"Type modifié"'''
+        
+        return m_query
+    
+    def _create_measures_definitions(self, df: pd.DataFrame) -> List[Dict]:
+        """Crée les définitions de mesures DAX pour le modèle"""
+        
+        measures = []
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        
+        for col in numeric_cols[:5]:  # Limiter à 5 colonnes
+            # Mesure de somme
+            measures.append({
+                "name": f"Total {col}",
+                "expression": f"SUM('{col}')",
+                "formatString": "#,##0.00",
+                "isHidden": False
+            })
+            
+            # Mesure de moyenne
+            measures.append({
+                "name": f"Moyenne {col}",
+                "expression": f"AVERAGE('{col}')",
+                "formatString": "#,##0.00",
+                "isHidden": False
+            })
+            
+            # Mesure de comptage
+            measures.append({
+                "name": f"Nombre {col}",
+                "expression": f"COUNT('{col}')",
+                "formatString": "#,##0",
+                "isHidden": False
+            })
+        
+        # Mesure de comptage total
+        measures.append({
+            "name": "Nombre total de lignes",
+            "expression": "COUNTROWS(ALLSELECTED())",
+            "formatString": "#,##0",
+            "isHidden": False
+        })
+        
+        return measures
+    
+    def _create_report_layout(self, df: pd.DataFrame, filename: str) -> Dict:
+        """Crée la mise en page du rapport PowerBI"""
+        
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        
+        # Configuration des pages du rapport
+        pages = []
+        
+        # Page 1: Vue d'ensemble
+        overview_page = {
+            "displayName": "Vue d'ensemble",
+            "width": 1280,
+            "height": 720,
+            "displayOption": 0,
+            "visualContainers": []
+        }
+        
+        # Ajouter des visuels à la page d'ensemble
+        visual_id = 0
+        
+        # 1. Carte avec métrique principale (si colonnes numériques disponibles)
+        if len(numeric_cols) > 0:
+            card_visual = self._create_card_visual(
+                visual_id, numeric_cols[0], x=10, y=10, width=300, height=150
+            )
+            overview_page["visualContainers"].append(card_visual)
+            visual_id += 1
+        
+        # 2. Graphique en barres (si colonnes catégorielles disponibles)
+        if len(categorical_cols) > 0 and len(numeric_cols) > 0:
+            bar_chart = self._create_bar_chart_visual(
+                visual_id, categorical_cols[0], numeric_cols[0], 
+                x=320, y=10, width=600, height=400
+            )
+            overview_page["visualContainers"].append(bar_chart)
+            visual_id += 1
+        
+        # 3. Tableau de données
+        table_visual = self._create_table_visual(
+            visual_id, df.columns.tolist()[:10], x=10, y=170, width=900, height=400
+        )
+        overview_page["visualContainers"].append(table_visual)
+        visual_id += 1
+        
+        pages.append(overview_page)
+        
+        # Page 2: Analyse détaillée (si suffisamment de colonnes)
+        if len(numeric_cols) >= 2:
+            detail_page = {
+                "displayName": "Analyse détaillée",
+                "width": 1280,
+                "height": 720,
+                "displayOption": 0,
+                "visualContainers": []
+            }
+            
+            # Graphique en courbes
+            line_chart = self._create_line_chart_visual(
+                visual_id, numeric_cols[0], numeric_cols[1],
+                x=10, y=10, width=600, height=400
+            )
+            detail_page["visualContainers"].append(line_chart)
+            
+            pages.append(detail_page)
+        
+        report_layout = {
+            "id": 1,
+            "resourcePackages": [],
+            "name": f"Rapport_{filename}",
+            "pages": pages,
+            "config": json.dumps({
+                "version": "5.0",
+                "themeCollection": {
+                    "baseTheme": {
+                        "name": "CY24SU06"
+                    }
+                }
+            })
+        }
+        
+        return report_layout
+    
+    def _create_card_visual(self, visual_id: int, column: str, x: int, y: int, width: int, height: int) -> Dict:
+        """Crée un visuel de type carte"""
+        return {
+            "x": x,
+            "y": y,
+            "z": visual_id,
+            "width": width,
+            "height": height,
+            "config": json.dumps({
+                "name": f"card_{visual_id}",
+                "singleVisual": {
+                    "visualType": "card",
+                    "projections": {
+                        "Values": [
+                            {
+                                "queryRef": f"Sum({column})"
+                            }
+                        ]
+                    },
+                    "prototypeQuery": {
+                        "Version": 2,
+                        "From": [{"Name": "c", "Entity": "Table"}],
+                        "Select": [
+                            {
+                                "Aggregation": {
+                                    "Expression": {"Column": {"Expression": {"SourceRef": {"Source": "c"}}, "Property": column}},
+                                    "Function": 0
+                                },
+                                "Name": f"Sum({column})"
+                            }
+                        ]
+                    }
+                }
+            })
+        }
+    
+    def _create_bar_chart_visual(self, visual_id: int, category_col: str, value_col: str, 
+                                  x: int, y: int, width: int, height: int) -> Dict:
+        """Crée un visuel de type graphique en barres"""
+        return {
+            "x": x,
+            "y": y,
+            "z": visual_id,
+            "width": width,
+            "height": height,
+            "config": json.dumps({
+                "name": f"barChart_{visual_id}",
+                "singleVisual": {
+                    "visualType": "barChart",
+                    "projections": {
+                        "Category": [{"queryRef": category_col}],
+                        "Y": [{"queryRef": f"Sum({value_col})"}]
+                    }
+                }
+            })
+        }
+    
+    def _create_line_chart_visual(self, visual_id: int, x_col: str, y_col: str,
+                                   x: int, y: int, width: int, height: int) -> Dict:
+        """Crée un visuel de type graphique en courbes"""
+        return {
+            "x": x,
+            "y": y,
+            "z": visual_id,
+            "width": width,
+            "height": height,
+            "config": json.dumps({
+                "name": f"lineChart_{visual_id}",
+                "singleVisual": {
+                    "visualType": "lineChart",
+                    "projections": {
+                        "Category": [{"queryRef": x_col}],
+                        "Y": [{"queryRef": f"Sum({y_col})"}]
+                    }
+                }
+            })
+        }
+    
+    def _create_table_visual(self, visual_id: int, columns: List[str], 
+                            x: int, y: int, width: int, height: int) -> Dict:
+        """Crée un visuel de type tableau"""
+        return {
+            "x": x,
+            "y": y,
+            "z": visual_id,
+            "width": width,
+            "height": height,
+            "config": json.dumps({
+                "name": f"table_{visual_id}",
+                "singleVisual": {
+                    "visualType": "tableEx",
+                    "projections": {
+                        "Values": [{"queryRef": col} for col in columns]
+                    }
+                }
+            })
+        }
+    
+    def _create_diagram_layout(self, df: pd.DataFrame) -> Dict:
+        """Crée la disposition des diagrammes (vue modèle)"""
+        return {
+            "diagramLayout": {
+                "tables": [
+                    {
+                        "name": "MainTable",
+                        "x": 100,
+                        "y": 100,
+                        "width": 200,
+                        "height": 200
+                    }
+                ]
+            }
+        }
+    
+    def _create_content_types_xml(self) -> str:
+        """Crée le fichier [Content_Types].xml requis pour PowerBI"""
+        return '''<?xml version="1.0" encoding="utf-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+    <Default Extension="json" ContentType="application/json" />
+</Types>'''
+    
+    def _create_security_bindings(self) -> Dict:
+        """Crée les liaisons de sécurité"""
+        return {
+            "version": "1.0",
+            "bindings": []
+        }
+    
+    def _create_dataset_configuration(self, df: pd.DataFrame) -> Dict:
+        """Crée la configuration du dataset"""
+        return {
+            "datasetName": "Dataset1",
+            "tables": [
+                {
+                    "name": "MainTable",
+                    "columns": [
+                        {
+                            "name": col,
+                            "dataType": str(dtype)
+                        } for col, dtype in df.dtypes.items()
+                    ]
+                }
+            ]
+        }
+    
+    def _create_report_configuration(self, df: pd.DataFrame, filename: str) -> str:
+        """Crée une configuration de rapport JSON détaillée"""
+        
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        
+        config = {
+            "reportName": f"Rapport_{filename}",
+            "version": "1.0",
+            "pages": [
+                {
+                    "name": "Vue d'ensemble",
+                    "visuals": []
+                }
+            ],
+            "dataModel": {
+                "tables": [
+                    {
+                        "name": filename.replace('.', '_'),
+                        "columns": [
+                            {
+                                "name": col,
+                                "type": str(dtype),
+                                "isKey": False
+                            } for col, dtype in df.dtypes.items()
+                        ]
+                    }
+                ]
+            },
+            "daxMeasures": self._create_dax_measures(df),
+            "recommendedVisuals": self._get_recommended_visuals(df, numeric_cols, categorical_cols)
+        }
+        
+        return json.dumps(config, indent=2, ensure_ascii=False)
+    
+    def _get_recommended_visuals(self, df: pd.DataFrame, numeric_cols: List[str], 
+                                 categorical_cols: List[str]) -> List[Dict]:
+        """Génère des recommandations de visuels"""
+        recommendations = []
+        
+        if len(numeric_cols) > 0:
+            recommendations.append({
+                "type": "Card",
+                "column": numeric_cols[0],
+                "description": f"Carte affichant la somme de {numeric_cols[0]}"
+            })
+        
+        if len(categorical_cols) > 0 and len(numeric_cols) > 0:
+            recommendations.append({
+                "type": "BarChart",
+                "category": categorical_cols[0],
+                "value": numeric_cols[0],
+                "description": f"Graphique en barres: {numeric_cols[0]} par {categorical_cols[0]}"
+            })
+        
+        if len(numeric_cols) >= 2:
+            recommendations.append({
+                "type": "ScatterChart",
+                "xAxis": numeric_cols[0],
+                "yAxis": numeric_cols[1],
+                "description": f"Nuage de points: {numeric_cols[0]} vs {numeric_cols[1]}"
+            })
+        
+        return recommendations
+    
+    def _get_format_string(self, series: pd.Series, dtype: str) -> str:
+        """Détermine le format string approprié pour une colonne"""
+        if 'int' in dtype:
+            return "#,##0"
+        elif 'float' in dtype:
+            return "#,##0.00"
+        elif 'datetime' in dtype:
+            return "dd/MM/yyyy"
+        else:
+            return ""
+    
+    def _get_summarize_by(self, dtype: str) -> str:
+        """Détermine la méthode de résumé par défaut"""
+        if 'int' in dtype or 'float' in dtype:
+            return "sum"
+        else:
+            return "none"
+    
+    # ===== Méthodes existantes (inchangées) =====
     
     def _create_excel_export(self, df: pd.DataFrame, filename: str, include_metadata: bool) -> bytes:
         """Crée un fichier Excel optimisé pour PowerBI"""
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Feuille principale avec les données
             df_clean = self._prepare_dataframe_for_powerbi(df)
             df_clean.to_excel(writer, sheet_name='Data', index=False)
             
             if include_metadata:
-                # Feuille avec métadonnées
                 metadata = self._generate_metadata(df, filename)
                 metadata_df = pd.DataFrame(list(metadata.items()), columns=['Propriété', 'Valeur'])
                 metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
                 
-                # Feuille avec informations sur les colonnes
                 column_info = self._generate_column_info(df)
                 column_info.to_excel(writer, sheet_name='Column_Info', index=False)
                 
-                # Feuille avec suggestions de visualisations
                 viz_suggestions = self._generate_visualization_suggestions(df)
                 viz_df = pd.DataFrame(viz_suggestions)
                 viz_df.to_excel(writer, sheet_name='Viz_Suggestions', index=False)
@@ -989,10 +1484,10 @@ class PowerBIExporter:
     def _create_csv_export(self, df: pd.DataFrame) -> str:
         """Crée un export CSV propre pour PowerBI"""
         df_clean = self._prepare_dataframe_for_powerbi(df)
-        return df_clean.to_csv(index=False, encoding='utf-8-sig')  # UTF-8 avec BOM pour PowerBI
+        return df_clean.to_csv(index=False, encoding='utf-8-sig')
     
     def _create_powerbi_template(self, df: pd.DataFrame, filename: str, include_metadata: bool) -> str:
-        """Crée un template JSON pour PowerBI"""
+        """Crée un template JSON simplifié pour PowerBI"""
         template = {
             "version": "1.0",
             "name": f"Template for {filename}",
@@ -1011,7 +1506,7 @@ class PowerBIExporter:
     def _create_dax_measures(self, df: pd.DataFrame) -> str:
         """Crée un script DAX avec des mesures courantes"""
         measures = []
-        for col in df.select_dtypes(include='number').columns[:5]:  # Limiter à 5 colonnes
+        for col in df.select_dtypes(include='number').columns[:5]:
             measures.append(f"{col}_Average = AVERAGE('{col}')")
             measures.append(f"{col}_Sum = SUM('{col}')")
             measures.append(f"{col}_Max = MAX('{col}')")
@@ -1061,7 +1556,6 @@ class PowerBIExporter:
                     "Suggestion": "Diagramme en barres ou camembert"
                 })
         return suggestions
-        
 
 
 
