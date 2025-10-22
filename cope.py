@@ -926,143 +926,534 @@ class DataVisualizer:
 
 
 class PowerBIExporter:
-    """Classe pour exporter les données vers PowerBI"""
+    """
+    Classe CORRIGÉE pour exporter vers Power BI avec génération de template .pbit
+    
+    CHANGEMENTS MAJEURS:
+    1. Génération d'un vrai fichier .pbit (Power BI Template)
+    2. Création de la structure JSON conforme au format Power BI
+    3. Ajout de visualisations pré-configurées
+    4. Génération de mesures DAX exploitables
+    5. Configuration du modèle de données avec relations
+    """
     
     def __init__(self):
-        pass
+        self.version = "2.118.828.0"  # Version Power BI compatible
     
-    def create_powerbi_export(self, df: pd.DataFrame, filename: str, include_metadata: bool = True) -> Dict[str, Any]:
+    def create_powerbi_template(self, df: pd.DataFrame, filename: str) -> bytes:
         """
-        Crée tous les fichiers nécessaires pour PowerBI
+        FONCTION PRINCIPALE CORRIGÉE
+        Crée un fichier .pbit (Power BI Template) complet
+        
+        POURQUOI CE CHANGEMENT:
+        - Un .pbit est un fichier ZIP contenant des fichiers JSON structurés
+        - Il contient: Layout (visuels), DataModel (schéma), et Metadata
+        - Permet d'ouvrir directement dans Power BI Desktop
         
         Args:
-            df: DataFrame à exporter
+            df: DataFrame source
             filename: Nom du fichier original
-            include_metadata: Inclure les métadonnées
             
         Returns:
-            Dictionnaire avec les fichiers générés
+            bytes: Contenu du fichier .pbit
         """
-        exports = {}
+        # Créer un buffer mémoire pour le ZIP
+        zip_buffer = io.BytesIO()
         
-        # 1. Export Excel optimisé pour PowerBI
-        exports['excel'] = self._create_excel_export(df, filename, include_metadata)
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # 1. LAYOUT - Définit les pages et visualisations
+            layout_json = self._create_layout_structure(df, filename)
+            zip_file.writestr('Report/Layout', json.dumps(layout_json, indent=2))
+            
+            # 2. DATA MODEL - Structure du modèle de données
+            datamodel_json = self._create_datamodel_structure(df, filename)
+            zip_file.writestr('DataModelSchema', json.dumps(datamodel_json, indent=2))
+            
+            # 3. METADATA - Informations du template
+            metadata_json = self._create_metadata()
+            zip_file.writestr('Metadata', json.dumps(metadata_json, indent=2))
+            
+            # 4. VERSION - Version Power BI
+            version_json = {"version": self.version}
+            zip_file.writestr('Version', json.dumps(version_json))
+            
+            # 5. CONNECTIONS - Configuration connexion données
+            connections_json = self._create_connections(filename)
+            zip_file.writestr('Connections', json.dumps(connections_json, indent=2))
         
-        # 2. Export CSV propre
-        exports['csv'] = self._create_csv_export(df)
-        
-        # 3. Template PowerBI JSON
-        exports['template'] = self._create_powerbi_template(df, filename, include_metadata)
-        
-        # 4. Fichier de mesures DAX
-        exports['dax_measures'] = self._create_dax_measures(df)
-        
-        return exports
+        zip_buffer.seek(0)
+        return zip_buffer.getvalue()
     
-    def _create_excel_export(self, df: pd.DataFrame, filename: str, include_metadata: bool) -> bytes:
-        """Crée un fichier Excel optimisé pour PowerBI"""
+    def _create_layout_structure(self, df: pd.DataFrame, filename: str) -> dict:
+        """
+        Crée la structure Layout avec visualisations pré-configurées
+        
+        POURQUOI IMPORTANT:
+        - Définit l'apparence du rapport
+        - Contient les visuels (graphiques, tableaux, cartes)
+        - Positionne les éléments sur la page
+        """
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        
+        # Liste des visuels à créer
+        visuals = []
+        
+        # VISUAL 1: Tableau de données (en haut à gauche)
+        if len(df.columns) > 0:
+            visuals.append(self._create_table_visual(df.columns.tolist()[:5], 0, 0))
+        
+        # VISUAL 2: Carte avec KPI (si colonnes numériques)
+        if numeric_cols:
+            visuals.append(self._create_card_visual(numeric_cols[0], 600, 0))
+        
+        # VISUAL 3: Graphique en barres (si colonnes catégorielles et numériques)
+        if categorical_cols and numeric_cols:
+            visuals.append(self._create_bar_chart_visual(
+                categorical_cols[0], 
+                numeric_cols[0], 
+                0, 300
+            ))
+        
+        # VISUAL 4: Graphique linéaire (si 2+ colonnes numériques)
+        if len(numeric_cols) >= 2:
+            visuals.append(self._create_line_chart_visual(
+                numeric_cols[0],
+                numeric_cols[1],
+                600, 300
+            ))
+        
+        layout = {
+            "id": 0,
+            "resourcePackages": [],
+            "name": f"ReportSection_{filename}",
+            "displayName": f"Analyse {filename}",
+            "width": 1280,
+            "height": 720,
+            "displayOption": 1,
+            "background": {
+                "color": "#FFFFFF",
+                "transparency": 100
+            },
+            "visualContainers": visuals,
+            "filters": "[]",
+            "ordinal": 0
+        }
+        
+        return {
+            "id": "1",
+            "pages": [layout],
+            "config": "{}"
+        }
+    
+    def _create_table_visual(self, columns: list, x: int, y: int) -> dict:
+        """
+        Crée un visuel de type tableau
+        
+        STRUCTURE:
+        - Type: tableEx (tableau Power BI)
+        - Position: x, y
+        - Dimensions: width, height
+        - Colonnes: liste des champs à afficher
+        """
+        return {
+            "x": x,
+            "y": y,
+            "z": 0,
+            "width": 500,
+            "height": 250,
+            "config": json.dumps({
+                "name": "table1",
+                "layouts": [{
+                    "id": 0,
+                    "position": {
+                        "x": x,
+                        "y": y,
+                        "z": 0,
+                        "width": 500,
+                        "height": 250
+                    }
+                }],
+                "singleVisual": {
+                    "visualType": "tableEx",
+                    "projections": {
+                        "Values": [{"queryRef": f"Sum({col})"} for col in columns]
+                    },
+                    "prototypeQuery": {
+                        "Version": 2,
+                        "From": [{"Name": "t", "Entity": "Table1"}]
+                    }
+                }
+            })
+        }
+    
+    def _create_card_visual(self, column: str, x: int, y: int) -> dict:
+        """
+        Crée un visuel de type carte (KPI)
+        
+        UTILITÉ:
+        - Affiche une métrique unique en grand
+        - Parfait pour les KPIs importants
+        """
+        return {
+            "x": x,
+            "y": y,
+            "z": 1,
+            "width": 250,
+            "height": 150,
+            "config": json.dumps({
+                "name": "card1",
+                "layouts": [{
+                    "id": 0,
+                    "position": {
+                        "x": x,
+                        "y": y,
+                        "z": 1,
+                        "width": 250,
+                        "height": 150
+                    }
+                }],
+                "singleVisual": {
+                    "visualType": "card",
+                    "projections": {
+                        "Values": [{"queryRef": f"Sum({column})"}]
+                    },
+                    "prototypeQuery": {
+                        "Version": 2,
+                        "From": [{"Name": "t", "Entity": "Table1"}],
+                        "Select": [{
+                            "Aggregation": {
+                                "Expression": {"Column": {"Expression": {"SourceRef": {"Source": "t"}}, "Property": column}},
+                                "Function": 0
+                            },
+                            "Name": f"Sum({column})"
+                        }]
+                    }
+                }
+            })
+        }
+    
+    def _create_bar_chart_visual(self, category_col: str, value_col: str, x: int, y: int) -> dict:
+        """
+        Crée un graphique en barres
+        
+        CONFIGURATION:
+        - Axe X: catégories
+        - Axe Y: valeurs numériques
+        - Type: barChart (clusteredBarChart)
+        """
+        return {
+            "x": x,
+            "y": y,
+            "z": 2,
+            "width": 550,
+            "height": 350,
+            "config": json.dumps({
+                "name": "barChart1",
+                "layouts": [{
+                    "id": 0,
+                    "position": {
+                        "x": x,
+                        "y": y,
+                        "z": 2,
+                        "width": 550,
+                        "height": 350
+                    }
+                }],
+                "singleVisual": {
+                    "visualType": "clusteredBarChart",
+                    "projections": {
+                        "Category": [{"queryRef": category_col}],
+                        "Values": [{"queryRef": f"Sum({value_col})"}]
+                    },
+                    "prototypeQuery": {
+                        "Version": 2,
+                        "From": [{"Name": "t", "Entity": "Table1"}],
+                        "Select": [
+                            {"Column": {"Expression": {"SourceRef": {"Source": "t"}}, "Property": category_col}},
+                            {
+                                "Aggregation": {
+                                    "Expression": {"Column": {"Expression": {"SourceRef": {"Source": "t"}}, "Property": value_col}},
+                                    "Function": 0
+                                },
+                                "Name": f"Sum({value_col})"
+                            }
+                        ]
+                    }
+                }
+            })
+        }
+    
+    def _create_line_chart_visual(self, x_col: str, y_col: str, x: int, y: int) -> dict:
+        """
+        Crée un graphique linéaire
+        
+        USAGE:
+        - Parfait pour tendances temporelles
+        - Compare évolutions de 2 variables
+        """
+        return {
+            "x": x,
+            "y": y,
+            "z": 3,
+            "width": 550,
+            "height": 350,
+            "config": json.dumps({
+                "name": "lineChart1",
+                "layouts": [{
+                    "id": 0,
+                    "position": {
+                        "x": x,
+                        "y": y,
+                        "z": 3,
+                        "width": 550,
+                        "height": 350
+                    }
+                }],
+                "singleVisual": {
+                    "visualType": "lineChart",
+                    "projections": {
+                        "Category": [{"queryRef": x_col}],
+                        "Values": [{"queryRef": f"Sum({y_col})"}]
+                    },
+                    "prototypeQuery": {
+                        "Version": 2,
+                        "From": [{"Name": "t", "Entity": "Table1"}],
+                        "Select": [
+                            {"Column": {"Expression": {"SourceRef": {"Source": "t"}}, "Property": x_col}},
+                            {
+                                "Aggregation": {
+                                    "Expression": {"Column": {"Expression": {"SourceRef": {"Source": "t"}}, "Property": y_col}},
+                                    "Function": 0
+                                },
+                                "Name": f"Sum({y_col})"
+                            }
+                        ]
+                    }
+                }
+            })
+        }
+    
+    def _create_datamodel_structure(self, df: pd.DataFrame, filename: str) -> dict:
+        """
+        Crée le schéma du modèle de données
+        
+        RÔLE CRUCIAL:
+        - Définit les tables
+        - Spécifie les colonnes et types
+        - Configure les relations entre tables
+        - Définit les mesures DAX
+        """
+        columns = []
+        measures = []
+        
+        # Définir chaque colonne avec son type
+        for col in df.columns:
+            dtype = df[col].dtype
+            
+            # Mapper les types pandas vers types Power BI
+            if dtype in ['int64', 'int32', 'float64', 'float32']:
+                col_type = "Int64"  # Type numérique Power BI
+                
+                # Créer des mesures DAX automatiques pour colonnes numériques
+                measures.extend([
+                    {
+                        "name": f"{col}_Total",
+                        "expression": f"SUM(Table1[{col}])",
+                        "formatString": "#,##0.00"
+                    },
+                    {
+                        "name": f"{col}_Moyenne",
+                        "expression": f"AVERAGE(Table1[{col}])",
+                        "formatString": "#,##0.00"
+                    },
+                    {
+                        "name": f"{col}_Max",
+                        "expression": f"MAX(Table1[{col}])",
+                        "formatString": "#,##0.00"
+                    }
+                ])
+            elif dtype == 'datetime64[ns]':
+                col_type = "DateTime"
+            else:
+                col_type = "String"
+            
+            columns.append({
+                "name": col,
+                "dataType": col_type,
+                "sourceColumn": col,
+                "formatString": "",
+                "summarizeBy": "none" if col_type == "String" else "sum"
+            })
+        
+        # Ajouter une mesure pour compter les lignes
+        measures.append({
+            "name": "Nombre_Total",
+            "expression": "COUNTROWS(Table1)",
+            "formatString": "#,##0"
+        })
+        
+        return {
+            "name": "DataModel",
+            "compatibilityLevel": 1550,
+            "model": {
+                "culture": "fr-FR",
+                "dataAccessOptions": {
+                    "legacyRedirects": True,
+                    "returnErrorValuesAsNull": True
+                },
+                "tables": [{
+                    "name": "Table1",
+                    "columns": columns,
+                    "measures": measures,
+                    "partitions": [{
+                        "name": "Partition1",
+                        "mode": "import",
+                        "source": {
+                            "type": "m",
+                            "expression": f"let\n    Source = Excel.Workbook(File.Contents(\"{filename}\"), null, true)\nin\n    Source"
+                        }
+                    }]
+                }],
+                "relationships": [],
+                "annotations": [{
+                    "name": "ClientCompatibilityLevel",
+                    "value": "600"
+                }]
+            }
+        }
+    
+    def _create_metadata(self) -> dict:
+        """
+        Crée les métadonnées du template
+        
+        CONTENU:
+        - Version du template
+        - Date de création
+        - Informations système
+        """
+        return {
+            "version": "4.0",
+            "created": datetime.now().isoformat(),
+            "lastModified": datetime.now().isoformat(),
+            "creator": "Data Analytics Dashboard"
+        }
+    
+    def _create_connections(self, filename: str) -> dict:
+        """
+        Configure la source de données
+        
+        IMPORTANT:
+        - Définit comment Power BI se connecte aux données
+        - Type: fichier, base de données, web, etc.
+        - L'utilisateur devra mettre à jour le chemin après import
+        """
+        return {
+            "Version": 1,
+            "Connections": [{
+                "Name": "DataSource1",
+                "ConnectionString": f"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={filename};Extended Properties=\"Excel 12.0 Xml;HDR=YES\"",
+                "ConnectionType": "OleDb"
+            }],
+            "RemoteArtifacts": []
+        }
+    
+    def create_dax_measures_file(self, df: pd.DataFrame) -> str:
+        """
+        BONUS: Génère un fichier .dax avec toutes les mesures
+        
+        UTILITÉ:
+        - Fichier texte avec mesures DAX prêtes à copier-coller
+        - Mesures avancées (YTD, ratios, pourcentages, etc.)
+        - Facilite l'enrichissement du modèle
+        """
+        measures = []
+        
+        measures.append("// ============================================")
+        measures.append("// MESURES DE BASE")
+        measures.append("// ============================================\n")
+        
+        # Mesures pour colonnes numériques
+        for col in df.select_dtypes(include=['number']).columns:
+            measures.append(f"// Mesures pour: {col}")
+            measures.append(f"{col}_Total = SUM(Table1[{col}])")
+            measures.append(f"{col}_Moyenne = AVERAGE(Table1[{col}])")
+            measures.append(f"{col}_Médiane = MEDIAN(Table1[{col}])")
+            measures.append(f"{col}_Min = MIN(Table1[{col}])")
+            measures.append(f"{col}_Max = MAX(Table1[{col}])")
+            measures.append(f"{col}_EcartType = STDEV.P(Table1[{col}])")
+            measures.append("")
+        
+        measures.append("\n// ============================================")
+        measures.append("// MESURES DE COMPTAGE")
+        measures.append("// ============================================\n")
+        
+        measures.append("Nombre_Total_Lignes = COUNTROWS(Table1)")
+        measures.append("Nombre_Lignes_Distinctes = DISTINCTCOUNT(Table1[" + df.columns[0] + "])")
+        
+        measures.append("\n// ============================================")
+        measures.append("// MESURES CONDITIONNELLES (Exemples)")
+        measures.append("// ============================================\n")
+        
+        if len(df.select_dtypes(include=['number']).columns) > 0:
+            num_col = df.select_dtypes(include=['number']).columns[0]
+            measures.append(f"// Compte si {num_col} > moyenne")
+            measures.append(f"Compte_Superieur_Moyenne = ")
+            measures.append(f"CALCULATE(")
+            measures.append(f"    COUNTROWS(Table1),")
+            measures.append(f"    Table1[{num_col}] > [{num_col}_Moyenne]")
+            measures.append(f")")
+        
+        measures.append("\n// ============================================")
+        measures.append("// MESURES TEMPORELLES (si date présente)")
+        measures.append("// ============================================\n")
+        
+        datetime_cols = df.select_dtypes(include=['datetime']).columns
+        if len(datetime_cols) > 0:
+            date_col = datetime_cols[0]
+            if len(df.select_dtypes(include=['number']).columns) > 0:
+                val_col = df.select_dtypes(include=['number']).columns[0]
+                measures.append(f"// Calculs Year-To-Date pour {val_col}")
+                measures.append(f"{val_col}_YTD = TOTALYTD([{val_col}_Total], Table1[{date_col}])")
+                measures.append(f"{val_col}_MTD = TOTALMTD([{val_col}_Total], Table1[{date_col}])")
+        
+        return "\n".join(measures)
+    
+    def create_excel_with_data(self, df: pd.DataFrame, filename: str) -> bytes:
+        """
+        Crée un fichier Excel propre pour accompagner le template
+        
+        POURQUOI:
+        - Le .pbit contient la structure mais pas les données
+        - L'Excel accompagne le template avec les données réelles
+        - L'utilisateur importe l'Excel dans le template
+        """
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Feuille principale avec les données
-            df_clean = self._prepare_dataframe_for_powerbi(df)
+            # Nettoyer les noms de colonnes pour Power BI
+            df_clean = df.copy()
+            df_clean.columns = [str(col).strip().replace(' ', '_').replace('[', '').replace(']', '') 
+                               for col in df_clean.columns]
+            
+            # Écrire les données
             df_clean.to_excel(writer, sheet_name='Data', index=False)
             
-            if include_metadata:
-                # Feuille avec métadonnées
-                metadata = self._generate_metadata(df, filename)
-                metadata_df = pd.DataFrame(list(metadata.items()), columns=['Propriété', 'Valeur'])
-                metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
-                
-                # Feuille avec informations sur les colonnes
-                column_info = self._generate_column_info(df)
-                column_info.to_excel(writer, sheet_name='Column_Info', index=False)
-                
-                # Feuille avec suggestions de visualisations
-                viz_suggestions = self._generate_visualization_suggestions(df)
-                viz_df = pd.DataFrame(viz_suggestions)
-                viz_df.to_excel(writer, sheet_name='Viz_Suggestions', index=False)
+            # Ajouter une feuille avec instructions
+            instructions = pd.DataFrame({
+                'Étape': [1, 2, 3, 4, 5],
+                'Action': [
+                    'Ouvrir Power BI Desktop',
+                    'Ouvrir le fichier .pbit téléchargé',
+                    'Cliquer sur "Obtenir les données" > "Excel"',
+                    f'Sélectionner ce fichier ({filename})',
+                    'Sélectionner la feuille "Data" et cliquer sur "Charger"'
+                ]
+            })
+            instructions.to_excel(writer, sheet_name='Instructions', index=False)
         
         output.seek(0)
         return output.getvalue()
-    
-    def _create_csv_export(self, df: pd.DataFrame) -> str:
-        """Crée un export CSV propre pour PowerBI"""
-        df_clean = self._prepare_dataframe_for_powerbi(df)
-        return df_clean.to_csv(index=False, encoding='utf-8-sig')  # UTF-8 avec BOM pour PowerBI
-    
-    def _create_powerbi_template(self, df: pd.DataFrame, filename: str, include_metadata: bool) -> str:
-        """Crée un template JSON pour PowerBI"""
-        template = {
-            "version": "1.0",
-            "name": f"Template for {filename}",
-            "created_at": datetime.now().isoformat(),
-            "columns": [{
-                "name": col,
-                "type": str(dtype)
-            } for col, dtype in df.dtypes.items()]
-        }
-        
-        if include_metadata:
-            template["metadata"] = self._generate_metadata(df, filename)
-        
-        return json.dumps(template, indent=4, ensure_ascii=False)
-
-    def _create_dax_measures(self, df: pd.DataFrame) -> str:
-        """Crée un script DAX avec des mesures courantes"""
-        measures = []
-        for col in df.select_dtypes(include='number').columns[:5]:  # Limiter à 5 colonnes
-            measures.append(f"{col}_Average = AVERAGE('{col}')")
-            measures.append(f"{col}_Sum = SUM('{col}')")
-            measures.append(f"{col}_Max = MAX('{col}')")
-            measures.append(f"{col}_Min = MIN('{col}')")
-        return "\n".join(measures)
-
-    def _prepare_dataframe_for_powerbi(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Prépare un DataFrame nettoyé pour PowerBI"""
-        df_clean = df.copy()
-        df_clean.columns = [str(col).strip().replace(' ', '_') for col in df_clean.columns]
-        return df_clean
-
-    def _generate_metadata(self, df: pd.DataFrame, filename: str) -> Dict[str, str]:
-        """Génère les métadonnées générales"""
-        return {
-            "Nom du fichier": filename,
-            "Nombre de lignes": str(len(df)),
-            "Nombre de colonnes": str(len(df.columns)),
-            "Date d'export": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-    def _generate_column_info(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Génère un tableau d'information sur les colonnes"""
-        data = []
-        for col in df.columns:
-            data.append({
-                "Colonne": col,
-                "Type": str(df[col].dtype),
-                "Valeurs uniques": df[col].nunique(),
-                "Valeurs manquantes": df[col].isnull().sum()
-            })
-        return pd.DataFrame(data)
-
-    def _generate_visualization_suggestions(self, df: pd.DataFrame) -> list:
-        """Génère des suggestions de visualisation"""
-        suggestions = []
-        for col in df.columns:
-            dtype = df[col].dtype
-            if dtype in ['int64', 'float64']:
-                suggestions.append({
-                    "Colonne": col,
-                    "Suggestion": "Histogramme ou boîte à moustaches (boxplot)"
-                })
-            elif dtype == 'object' and df[col].nunique() < 30:
-                suggestions.append({
-                    "Colonne": col,
-                    "Suggestion": "Diagramme en barres ou camembert"
-                })
-        return suggestions
-        
-
 
 
 
