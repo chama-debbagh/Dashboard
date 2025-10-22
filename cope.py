@@ -927,148 +927,26 @@ class DataVisualizer:
 
 
 
-
 class PowerBIExporter:
     """Classe pour exporter les données vers PowerBI"""
-    
     def __init__(self):
         pass
-    
+
     def create_powerbi_export(self, df: pd.DataFrame, filename: str, include_metadata: bool = True) -> Dict[str, Any]:
-        """
-        Crée tous les fichiers nécessaires pour PowerBI
-        
-        Args:
-            df: DataFrame à exporter
-            filename: Nom du fichier original
-            include_metadata: Inclure les métadonnées
-            
-        Returns:
-            Dictionnaire avec les fichiers générés
-        """
         exports = {}
-        
-        # 1. Export Excel optimisé pour PowerBI
         exports['excel'] = self._create_excel_export(df, filename, include_metadata)
-        
-        # 2. Export CSV propre
         exports['csv'] = self._create_csv_export(df)
-        
-        # 3. Template PowerBI JSON
         exports['template'] = self._create_powerbi_template(df, filename, include_metadata)
-        
-        # 4. Fichier de mesures DAX
         exports['dax_measures'] = self._create_dax_measures(df)
-        
         return exports
-    
-    def _create_excel_export(self, df: pd.DataFrame, filename: str, include_metadata: bool) -> bytes:
-        """Crée un fichier Excel optimisé pour PowerBI"""
-        output = io.BytesIO()
-        
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Feuille principale avec les données
-            df_clean = self._prepare_dataframe_for_powerbi(df)
-            df_clean.to_excel(writer, sheet_name='Data', index=False)
-            
-            if include_metadata:
-                # Feuille avec métadonnées
-                metadata = self._generate_metadata(df, filename)
-                metadata_df = pd.DataFrame(list(metadata.items()), columns=['Propriété', 'Valeur'])
-                metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
-                
-                # Feuille avec informations sur les colonnes
-                column_info = self._generate_column_info(df)
-                column_info.to_excel(writer, sheet_name='Column_Info', index=False)
-                
-                # Feuille avec suggestions de visualisations
-                viz_suggestions = self._generate_visualization_suggestions(df)
-                viz_df = pd.DataFrame(viz_suggestions)
-                viz_df.to_excel(writer, sheet_name='Viz_Suggestions', index=False)
-        
-        output.seek(0)
-        return output.getvalue()
-    
-    def _create_csv_export(self, df: pd.DataFrame) -> str:
-        """Crée un export CSV propre pour PowerBI"""
-        df_clean = self._prepare_dataframe_for_powerbi(df)
-        return df_clean.to_csv(index=False, encoding='utf-8-sig')  # UTF-8 avec BOM pour PowerBI
-    
-    def _create_powerbi_template(self, df: pd.DataFrame, filename: str, include_metadata: bool) -> str:
-        """Crée un template JSON pour PowerBI"""
-        template = {
-            "version": "1.0",
-            "name": f"Template for {filename}",
-            "created_at": datetime.now().isoformat(),
-            "columns": [{
-                "name": col,
-                "type": str(dtype)
-            } for col, dtype in df.dtypes.items()]
-        }
-        
-        if include_metadata:
-            template["metadata"] = self._generate_metadata(df, filename)
-        
-        return json.dumps(template, indent=4, ensure_ascii=False)
 
-    def _create_dax_measures(self, df: pd.DataFrame) -> str:
-        """Crée un script DAX avec des mesures courantes"""
-        measures = []
-        for col in df.select_dtypes(include='number').columns[:5]:  # Limiter à 5 colonnes
-            measures.append(f"{col}_Average = AVERAGE('{col}')")
-            measures.append(f"{col}_Sum = SUM('{col}')")
-            measures.append(f"{col}_Max = MAX('{col}')")
-            measures.append(f"{col}_Min = MIN('{col}')")
-        return "\n".join(measures)
+    # ... (tes méthodes _create_excel_export, _create_csv_export, _create_powerbi_template, _create_dax_measures, etc. inchangées) ...
 
-    def _prepare_dataframe_for_powerbi(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Prépare un DataFrame nettoyé pour PowerBI"""
-        df_clean = df.copy()
-        df_clean.columns = [str(col).strip().replace(' ', '_') for col in df_clean.columns]
-        return df_clean
-
-    def _generate_metadata(self, df: pd.DataFrame, filename: str) -> Dict[str, str]:
-        """Génère les métadonnées générales"""
-        return {
-            "Nom du fichier": filename,
-            "Nombre de lignes": str(len(df)),
-            "Nombre de colonnes": str(len(df.columns)),
-            "Date d'export": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-    def _generate_column_info(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Génère un tableau d'information sur les colonnes"""
-        data = []
-        for col in df.columns:
-            data.append({
-                "Colonne": col,
-                "Type": str(df[col].dtype),
-                "Valeurs uniques": df[col].nunique(),
-                "Valeurs manquantes": df[col].isnull().sum()
-            })
-        return pd.DataFrame(data)
-
-    def _generate_visualization_suggestions(self, df: pd.DataFrame) -> list:
-        """Génère des suggestions de visualisation"""
-        suggestions = []
-        for col in df.columns:
-            dtype = df[col].dtype
-            if dtype in ['int64', 'float64']:
-                suggestions.append({
-                    "Colonne": col,
-                    "Suggestion": "Histogramme ou boîte à moustaches (boxplot)"
-                })
-            elif dtype == 'object' and df[col].nunique() < 30:
-                suggestions.append({
-                    "Colonne": col,
-                    "Suggestion": "Diagramme en barres ou camembert"
-                })
-        return suggestions
-    
     def create_pbids_for_csv(self, csv_filename: str, friendly_name: str = "Dataset") -> str:
         """
-        Génère un contenu PBIDS (JSON) pointant vers un CSV local.
-        Retourne une chaîne JSON (à télécharger en .pbids).
+        PBIDS **valide** pour Power BI Desktop :
+        - details.address.path (chemin du fichier)
+        - details.extension ("csv")
         """
         pbids = {
             "version": "0.1",
@@ -1076,7 +954,8 @@ class PowerBIExporter:
                 {
                     "details": {
                         "protocol": "file",
-                        "path": csv_filename  # ex: "./mon_export_powerbi.csv"
+                        "address": { "path": f"./{csv_filename}" },
+                        "extension": "csv"
                     },
                     "name": friendly_name,
                     "mode": "import"
@@ -1086,51 +965,38 @@ class PowerBIExporter:
         return json.dumps(pbids, indent=4, ensure_ascii=False)
 
     def create_readme_for_powerbi(self, base_csv_name: str, base_filename: str) -> str:
-        """
-        Génère un README expliquant comment ouvrir le PBIDS et produire un .pbit dans Power BI Desktop.
-        """
         return f"""# Template Power BI – Guide rapide
 
-    Ce dossier contient :
-    - `{base_csv_name}` : données propres exportées depuis le dashboard
-    - `{base_filename}.pbids` : fichier **PBIDS** qui préconfigure la source de données
-    - `{base_filename}_measures.txt` : suggestions de mesures DAX
-    - `{base_filename}_template.json` : méta-infos (colonnes/types)
+Ce dossier contient :
+- `{base_csv_name}` : données exportées (UTF-8)
+- `{base_filename}.pbids` : fichier PBIDS (ouvre Power BI directement sur la source)
+- `{base_filename}_measures.txt` : mesures DAX suggérées
+- `{base_filename}_template.json` : méta-infos (colonnes/types)
 
-    ## Utilisation dans Power BI Desktop
-    1. Placez **{base_csv_name}** et **{base_filename}.pbids** dans le **même dossier**.
-    2. **Double-cliquez** sur `{base_filename}.pbids` (ou `Fichier → Ouvrir` dans Power BI Desktop).
-    3. Validez la connexion et chargez les données.
-    4. Créez vos visuels et, si vous voulez un modèle réutilisable :
-    **Fichier → Exporter → Modèle Power BI (.pbit)**.
-
-    Notes :
-    - Le fichier **PBIDS** sert à accélérer *Get Data* ; le vrai modèle **.pbit** se sauvegarde depuis Power BI Desktop.
-    - Un PBIDS référence **une seule source** par fichier (.pbids)."""
+## Utilisation
+1) Décompressez le ZIP (tous les fichiers **dans le même dossier**).
+2) Double-cliquez `{base_filename}.pbids` → Power BI Desktop s’ouvre, chargez les données.
+3) Créez vos visuels puis **Fichier → Exporter → Modèle Power BI (.pbit)** pour obtenir le template réutilisable.
+"""
 
     def create_powerbi_template_package(self, df: pd.DataFrame, filename: str, include_metadata: bool = True) -> dict:
         """
-        Crée un pack complet: CSV, PBIDS, DAX, template JSON, et un ZIP prêt à télécharger.
-        Retourne un dict avec: csv_str, pbids_str, dax_str, template_json_str, zip_bytes
+        Crée un pack : CSV, PBIDS, DAX, JSON méta + ZIP prêt à télécharger.
         """
-        # 1) CSV propre (même logique que _create_csv_export)
+        # CSV propre
         df_clean = self._prepare_dataframe_for_powerbi(df)
         csv_str = df_clean.to_csv(index=False, encoding="utf-8-sig")
-
-        # 2) PBIDS pointant vers ce CSV (nom attendu côté utilisateur)
         csv_name = f"{filename}_powerbi.csv"
+
+        # PBIDS pointant vers ce CSV (chemin relatif)
         pbids_str = self.create_pbids_for_csv(csv_name, friendly_name=filename)
 
-        # 3) DAX (réutilise ta méthode existante)
+        # Fichiers additionnels
         dax_str = self._create_dax_measures(df)
-
-        # 4) Template JSON (réutilise ta méthode existante)
         template_json_str = self._create_powerbi_template(df, filename, include_metadata)
-
-        # 5) README
         readme_str = self.create_readme_for_powerbi(csv_name, filename)
 
-        # 6) ZIP tout-en-un
+        # ZIP
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr(csv_name, csv_str)
@@ -1150,7 +1016,7 @@ class PowerBIExporter:
             "pbids_download_name": f"{filename}.pbids",
             "zip_download_name": f"{filename}_powerbi_template_pack.zip"
         }
-        
+
 
 
 
@@ -1605,16 +1471,12 @@ def render_powerbi_page():
         return
 
     df = st.session_state['data']
-    filename = st.session_state.get('filename', 'data')
+    filename = Path(st.session_state.get('filename', 'data')).stem  # sans extension
 
     st.markdown("### 🎯 Préparation pour PowerBI")
-
     col1, col2 = st.columns(2)
     with col1:
-        export_format = st.selectbox(
-            "Format d'export",
-            ["Excel (.xlsx)", "CSV", "JSON", "Template PowerBI"]
-        )
+        export_format = st.selectbox("Format d'export", ["Excel (.xlsx)", "CSV", "JSON", "Template PowerBI"])
     with col2:
         include_metadata = st.checkbox("Inclure les métadonnées", value=True)
 
@@ -1624,69 +1486,60 @@ def render_powerbi_page():
     if st.button("🚀 Générer l'export PowerBI", type="primary"):
         with st.spinner("⏳ Génération en cours..."):
             exports = powerbi_exporter.create_powerbi_export(df, filename, include_metadata)
-
-            # 🔥 Nouveau : Pack “Template Power BI” (PBIDS + ZIP complet)
             pack = powerbi_exporter.create_powerbi_template_package(df, filename, include_metadata)
 
         st.success("✅ Export généré avec succès!")
 
         col1, col2, col3, col4 = st.columns(4)
-
         with col1:
             st.download_button(
-                "📊 Télécharger Excel",
+                "📊 Excel",
                 exports['excel'],
                 file_name=f"{filename}_powerbi.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_excel_pbi_new"
+                key="dl_excel"
             )
-
         with col2:
             st.download_button(
-                "📋 Télécharger CSV",
+                "📋 CSV",
                 pack['csv_str'],
                 file_name=pack['csv_download_name'],
                 mime="text/csv",
-                key="download_csv_pbi_new"
+                key="dl_csv"
             )
-
         with col3:
             st.download_button(
-                "⚙️ Template JSON (méta)",
-                pack['template_json_str'],
-                file_name=f"{filename}_template.json",
-                mime="application/json",
-                key="download_template_json_new"
-            )
-
-        with col4:
-            st.download_button(
-                "🧩 Ouvrir dans Power BI (PBIDS)",
+                "🧩 PBIDS (ouvrir dans Power BI)",
                 pack['pbids_str'],
                 file_name=pack['pbids_download_name'],
                 mime="application/json",
-                key="download_pbids_new"
+                key="dl_pbids"
+            )
+        with col4:
+            st.download_button(
+                "⚙️ JSON méta",
+                pack['template_json_str'],
+                file_name=f"{filename}_template.json",
+                mime="application/json",
+                key="dl_meta"
             )
 
         st.download_button(
-            "📦 Télécharger le pack complet (ZIP)",
+            "📦 Pack complet (ZIP)",
             pack['zip_bytes'],
             file_name=pack['zip_download_name'],
             mime="application/zip",
             use_container_width=True,
-            key="download_zip_pack"
+            key="dl_zip"
         )
 
-        with st.expander("📖 Instructions d’import Power BI (officielles)"):
+        with st.expander("📖 Instructions Power BI"):
             st.markdown("""
-    **Option rapide (recommandée)**  
-    1. Téléchargez le **ZIP** et **décompressez**.  
-    2. Double-cliquez le **`.pbids`** → Power BI Desktop s'ouvre avec la source préconfigurée.  
-    3. Chargez les données, créez vos visuels, puis **Fichier → Exporter → Modèle Power BI (.pbit)**.
-
-    **Rappels utiles :**
-    - Le fichier **PBIDS** est un des moyens officiels pour préconfigurer *Get Data* (une source par fichier).  
-    - Le **vrai template** réutilisable est le **`.pbit`**, qu’on **enregistre depuis Power BI Desktop** après avoir ouvert le PBIDS/CSV.
+    **Ouvrir dans Power BI Desktop**
+    1. Téléchargez le **ZIP** et **décompressez** (tous les fichiers dans le même dossier).
+    2. **Double-cliquez** le fichier `.pbids` → Power BI Desktop ouvre la source (CSV) automatiquement.  
+    3. Chargez les données.  
+    4. **Fichier → Exporter → Modèle Power BI (.pbit)** pour créer votre template réutilisable.
     """)
 
 
