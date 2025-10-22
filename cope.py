@@ -1061,25 +1061,7 @@ class PowerBIExporter:
                     "Suggestion": "Diagramme en barres ou camembert"
                 })
         return suggestions
-        def create_pbids_for_csv(self, csv_filename: str, friendly_name: str = "Dataset"):
-        """
-        Génère un fichier PBIDS (pré-config Get Data) pointant vers un CSV local.
-        Retourne (pbids_json_str, suggested_filename)
-        """
-        pbids = {
-            "version": "0.1",
-            "connections": [
-                {
-                    "details": {
-                        "protocol": "file",
-                        "path": csv_filename  # ex: "./mon_export_powerbi.csv"
-                    },
-                    "name": friendly_name,
-                    "mode": "import"  # Power BI importera le CSV
-                }
-            ]
-        }
-        return json.dumps(pbids, indent=4, ensure_ascii=False), Path(csv_filename).with_suffix(".pbids").name
+        
 
 
 
