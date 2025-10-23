@@ -14,7 +14,7 @@ from io import StringIO
 import sys
 import chardet
 import openpyxl
-from plotly.subplots import make_subplots  # déjà utilisé dans create_distribution_comparison
+from plotly.subplots import make_subplots  
 import zipfile
 
 
