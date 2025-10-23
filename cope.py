@@ -1026,12 +1026,6 @@ class PowerBIExporter:
         }
         return json.dumps(pbids, indent=4, ensure_ascii=False)
 
-    def create_readme_for_powerbi(self, base_csv_name: str, base_filename: str) -> str:
-        return f"""# Template Power BI – Guide rapide
-1) Décompressez le ZIP (tous les fichiers **dans le même dossier**).
-2) Double-cliquez `{base_filename}.pbids` → Power BI Desktop ouvre la source (CSV).
-3) Chargez les données puis **Fichier → Exporter → Modèle Power BI (.pbit)**.
-"""
 
     def create_powerbi_template_package(self, df: pd.DataFrame, filename: str, include_metadata: bool = True) -> dict:
         df_clean = self._prepare_dataframe_for_powerbi(df)
