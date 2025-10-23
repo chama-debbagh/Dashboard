@@ -939,7 +939,7 @@ class PowerBIExporter:
         exports['dax_measures'] = self._create_dax_measures(df)
         return exports
 
-    # ---------- DOIVENT ÊTRE DANS LA CLASSE (4 espaces) ----------
+ 
     def _create_excel_export(self, df: pd.DataFrame, filename: str, include_metadata: bool) -> bytes:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -1008,7 +1008,6 @@ class PowerBIExporter:
                 suggestions.append({"Colonne": col, "Suggestion": "Barres / Camembert"})
         return suggestions
 
-    # ---------- PBIDS (schéma Microsoft) ----------
     def create_pbids_for_csv(self, csv_filename: str, friendly_name: str = "Dataset") -> str:
         pbids = {
             "version": "0.1",
